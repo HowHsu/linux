@@ -572,6 +572,11 @@ static int fuse_show_options(struct seq_file *m, struct dentry *root)
 		if (sb->s_bdev && sb->s_blocksize != FUSE_DEFAULT_BLKSIZE)
 			seq_printf(m, ",blksize=%lu", sb->s_blocksize);
 	}
+#ifdef CONFIG_FUSE_DAX
+	if (fc->dax)
+		seq_puts(m, ",dax");
+#endif
+
 	return 0;
 }
 
@@ -636,6 +641,8 @@ void fuse_conn_put(struct fuse_conn *fc)
 	if (refcount_dec_and_test(&fc->count)) {
 		struct fuse_iqueue *fiq = &fc->iq;
 
+		if (IS_ENABLED(CONFIG_FUSE_DAX))
+			fuse_dax_conn_free(fc);
 		if (fiq->ops->release)
 			fiq->ops->release(fiq);
 		put_pid_ns(fc->pid_ns);
@@ -1163,7 +1170,7 @@ int fuse_fill_super_common(struct super_block *sb, struct fuse_fs_context *ctx)
 
 	fud = fuse_dev_alloc_install(fc);
 	if (!fud)
-		goto err;
+		goto err_free_dax;
 
 	fc->dev = sb->s_dev;
 	fc->sb = sb;
@@ -1215,6 +1222,11 @@ int fuse_fill_super_common(struct super_block *sb, struct fuse_fs_context *ctx)
 	dput(root_dentry);
  err_dev_free:
 	fuse_dev_free(fud);
+	if (fud)
+		fuse_dev_free(fud);
+ err_free_dax:
+	if (IS_ENABLED(CONFIG_FUSE_DAX))
+		fuse_dax_conn_free(fc);
  err:
 	return err;
 }
