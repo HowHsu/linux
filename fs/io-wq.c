@@ -263,6 +263,25 @@ static bool io_task_worker_match(struct callback_head *cb, void *data)
 	return worker == data;
 }
 
+static void io_fixed_worker_exit(struct io_worker * worker)
+{
+	int *nr_fixed;
+	int index = worker->acct.index;
+	struct io_wqe *wqe = worker->wqe;
+	struct io_wqe_acct *acct = io_get_acct(wqe, index == 0, true);
+	struct io_worker **fixed_workers;
+
+	down_write(&acct->rwsem);
+	fixed_workers = acct->fixed_workers;
+	nr_fixed = &acct->nr_fixed;
+	/* reuse variable index to represent fixed worker index in its array */
+	index = worker->index;
+	fixed_workers[index] = fixed_workers[*nr_fixed - 1];
+	(*nr_fixed)--;
+	fixed_workers[index]->index = index;
+	up_write(&acct->rwsem);
+}
+
 static void io_worker_exit(struct io_worker *worker)
 {
 	struct io_wqe *wqe = worker->wqe;
@@ -276,6 +295,9 @@ static void io_worker_exit(struct io_worker *worker)
 			break;
 		io_worker_cancel_cb(worker);
 	}
+
+	if (worker->flags & IO_WORKER_F_FIXED)
+		io_fixed_worker_exit(worker);
 
 	io_worker_release(worker);
 	wait_for_completion(&worker->ref_done);
