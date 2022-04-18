@@ -360,6 +360,12 @@ enum {
 	IORING_REGISTER_RING_FDS		= 20,
 	IORING_UNREGISTER_RING_FDS		= 21,
 
+	/* set number of fixed workers and number
+	 * of works in a private work list which
+	 * belongs to a fixed worker
+	 */
+	IORING_REGISTER_IOWQ_FIXED_WORKERS	= 22,
+
 	/* this goes last */
 	IORING_REGISTER_LAST
 };
@@ -455,6 +461,11 @@ struct io_uring_getevents_arg {
 	__u32	sigmask_sz;
 	__u32	pad;
 	__u64	ts;
+};
+
+struct io_uring_fixed_worker_arg {
+	__s32	nr_workers;
+	__s32	max_works;
 };
 
 #endif
