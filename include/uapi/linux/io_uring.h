@@ -214,6 +214,11 @@ enum {
 #define IORING_ASYNC_CANCEL_ANY	(1U << 2)
 
 /*
+ * accept flags stored in accept_flags
+ */
+#define IORING_ACCEPT_MULTISHOT	(1U << 15)
+
+/*
  * IO completion data structure (Completion Queue Entry)
  */
 struct io_uring_cqe {
