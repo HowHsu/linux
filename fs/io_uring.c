@@ -4704,7 +4704,7 @@ static int io_openat2_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
 	return __io_openat_prep(req, sqe);
 }
 
-static __maybe_unused struct io_fixed_file *io_file_slot_get(struct io_ring_ctx *ctx)
+static struct io_fixed_file *io_file_slot_get(struct io_ring_ctx *ctx)
 {
 	struct io_file_table *table = &ctx->file_table;
 
@@ -4766,11 +4766,16 @@ static int io_openat2(struct io_kiocb *req, unsigned int issue_flags)
 		file->f_flags &= ~O_NONBLOCK;
 	fsnotify_open(file);
 
-	if (!fixed)
+	if (!fixed) {
 		fd_install(ret, file);
-	else
+	} else {
+		bool alloc_slot = req->open.file_slot == UINT_MAX;
+
 		ret = io_install_fixed_file(req, file, issue_flags,
-					    req->open.file_slot - 1);
+					    req->open.file_slot);
+		if (!alloc_slot && ret > 0)
+			ret = 0;
+	}
 err:
 	putname(req->open.filename);
 	req->flags &= ~REQ_F_NEED_CLEANUP;
@@ -5781,8 +5786,12 @@ retry:
 		fd_install(fd, file);
 		ret = fd;
 	} else {
+		bool alloc_slot = accept->file_slot == UINT_MAX;
+
 		ret = io_install_fixed_file(req, file, issue_flags,
-					    accept->file_slot - 1);
+					    accept->file_slot);
+		if (!alloc_slot && ret > 0)
+			ret = 0;
 	}
 
 	if (!(req->flags & REQ_F_APOLL_MULTISHOT)) {
@@ -9182,6 +9191,7 @@ static int io_install_fixed_file(struct io_kiocb *req, struct file *file,
 	bool needs_switch = false;
 	struct io_fixed_file *file_slot;
 	int ret = -EBADF;
+	bool alloc_slot = slot_index == UINT_MAX;
 
 	io_ring_submit_lock(ctx, issue_flags);
 	if (file->f_op == &io_uring_fops)
@@ -9193,9 +9203,17 @@ static int io_install_fixed_file(struct io_kiocb *req, struct file *file,
 	if (slot_index >= ctx->nr_user_files)
 		goto err;
 
-	slot_index = array_index_nospec(slot_index, ctx->nr_user_files);
-	file_slot = io_fixed_file_slot(&ctx->file_table, slot_index);
-
+	if (alloc_slot) {
+		file_slot = io_file_slot_get(ctx);
+		if (IS_ERR(file_slot)) {
+			ret = PTR_ERR(file_slot);
+			goto err;
+		}
+		slot_index = file_slot->index;
+	} else {
+		slot_index = array_index_nospec(slot_index - 1, ctx->nr_user_files);
+		file_slot = io_fixed_file_slot(&ctx->file_table, slot_index);
+	}
 	if (file_slot->file_ptr) {
 		struct file *old_file;
 
@@ -9223,9 +9241,11 @@ err:
 	if (needs_switch)
 		io_rsrc_node_switch(ctx, ctx->file_data);
 	io_ring_submit_unlock(ctx, issue_flags);
-	if (ret)
+	if (ret < 0) {
 		fput(file);
-	return ret;
+		return ret;
+	}
+	return slot_index;
 }
 
 static int io_close_fixed(struct io_kiocb *req, unsigned int issue_flags)
