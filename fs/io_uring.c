@@ -244,8 +244,9 @@ struct io_overflow_cqe {
 
 struct io_fixed_file {
 	/* file * with additional FFS_* flags */
-	unsigned long file_ptr;
-	int index;
+	unsigned long		file_ptr;
+	int			index;
+	struct list_head	list;
 };
 
 struct io_rsrc_put {
@@ -259,7 +260,8 @@ struct io_rsrc_put {
 };
 
 struct io_file_table {
-	struct io_fixed_file *files;
+	struct io_fixed_file	*files;
+	struct list_head	free_slots;
 };
 
 struct io_rsrc_node {
@@ -8694,13 +8696,30 @@ static bool io_alloc_file_tables(struct io_file_table *table, unsigned nr_files)
 {
 	table->files = kvcalloc(nr_files, sizeof(table->files[0]),
 				GFP_KERNEL_ACCOUNT);
-	return !!table->files;
+	if (unlikely(table->files))
+		return false;
+
+	INIT_LIST_HEAD(&table->free_slots);
+	return true;
 }
 
 static void io_free_file_tables(struct io_file_table *table)
 {
 	kvfree(table->files);
 	table->files = NULL;
+}
+
+static inline void io_file_mark_used(struct io_fixed_file *file_slot)
+{
+	list_del_init(&file_slot->list);
+}
+
+static inline void io_file_mark_unused(struct io_file_table *table,
+				       struct io_fixed_file *file_slot,
+				       int slot_index)
+{
+	list_add(&file_slot->list, &table->free_slots);
+	file_slot->index = slot_index;
 }
 
 static void __io_sqe_files_unregister(struct io_ring_ctx *ctx)
@@ -9092,6 +9111,8 @@ static int io_sqe_files_register(struct io_ring_ctx *ctx, void __user *arg,
 			ret = -EINVAL;
 			if (unlikely(*io_get_tag_slot(ctx->file_data, i)))
 				goto fail;
+			file_slot = io_fixed_file_slot(&ctx->file_table, i);
+			io_file_mark_unused(&ctx->file_table, file_slot, i);
 			continue;
 		}
 
@@ -9178,6 +9199,7 @@ static int io_install_fixed_file(struct io_kiocb *req, struct file *file,
 		if (ret)
 			goto err;
 		file_slot->file_ptr = 0;
+		io_file_mark_unused(&ctx->file_table, file_slot, slot_index);
 		needs_switch = true;
 	}
 
@@ -9185,6 +9207,7 @@ static int io_install_fixed_file(struct io_kiocb *req, struct file *file,
 	if (!ret) {
 		*io_get_tag_slot(ctx->file_data, slot_index) = 0;
 		io_fixed_file_set(file_slot, file);
+		io_file_mark_used(file_slot);
 	}
 err:
 	if (needs_switch)
@@ -9226,6 +9249,7 @@ static int io_close_fixed(struct io_kiocb *req, unsigned int issue_flags)
 		goto out;
 
 	file_slot->file_ptr = 0;
+	io_file_mark_unused(&ctx->file_table, file_slot, offset);
 	io_rsrc_node_switch(ctx, ctx->file_data);
 	ret = 0;
 out:
@@ -9275,6 +9299,7 @@ static int __io_sqe_files_update(struct io_ring_ctx *ctx,
 			if (err)
 				break;
 			file_slot->file_ptr = 0;
+			io_file_mark_unused(&ctx->file_table, file_slot, i);
 			needs_switch = true;
 		}
 		if (fd != -1) {
@@ -9303,6 +9328,7 @@ static int __io_sqe_files_update(struct io_ring_ctx *ctx,
 			}
 			*io_get_tag_slot(data, i) = tag;
 			io_fixed_file_set(file_slot, file);
+			io_file_mark_used(file_slot);
 		}
 	}
 
