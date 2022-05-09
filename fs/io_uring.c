@@ -4704,6 +4704,16 @@ static int io_openat2_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
 	return __io_openat_prep(req, sqe);
 }
 
+static __maybe_unused struct io_fixed_file *io_file_slot_get(struct io_ring_ctx *ctx)
+{
+	struct io_file_table *table = &ctx->file_table;
+
+	if (list_empty(&table->free_slots))
+		return ERR_PTR(-ENFILE);
+
+	return list_first_entry(&table->free_slots, struct io_fixed_file, list);
+}
+
 static int io_openat2(struct io_kiocb *req, unsigned int issue_flags)
 {
 	struct open_flags op;
