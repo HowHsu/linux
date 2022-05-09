@@ -245,6 +245,7 @@ struct io_overflow_cqe {
 struct io_fixed_file {
 	/* file * with additional FFS_* flags */
 	unsigned long file_ptr;
+	int index;
 };
 
 struct io_rsrc_put {
