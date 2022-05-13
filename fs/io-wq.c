@@ -126,6 +126,7 @@ struct io_worker {
 	};
 	int index;
 	struct io_wqe_acct acct;
+	struct io_wqe_acct exec_acct;
 };
 
 #if BITS_PER_LONG == 64
@@ -723,14 +724,17 @@ static void io_worker_handle_work(struct io_worker *worker,
 
 static inline void io_worker_handle_private_work(struct io_worker *worker)
 {
-	struct io_wqe_acct acct;
+	struct io_wqe_acct *acct = &worker->acct;
+	struct io_wqe_acct *exec_acct = &worker->exec_acct;
 
-	raw_spin_lock(&worker->acct.lock);
-	acct = worker->acct;
-	wq_list_clean(&worker->acct.work_list);
-	worker->acct.nr_works = 0;
-	raw_spin_unlock(&worker->acct.lock);
-	io_worker_handle_work(worker, &acct, false);
+	raw_spin_lock(&acct->lock);
+	exec_acct->nr_works = acct->nr_works;
+	exec_acct->max_works = acct->max_works;
+	exec_acct->work_list = acct->work_list;
+	wq_list_clean(&acct->work_list);
+	acct->nr_works = 0;
+	raw_spin_unlock(&acct->lock);
+	io_worker_handle_work(worker, exec_acct, false);
 }
 
 static inline void io_worker_handle_public_work(struct io_worker *worker)
@@ -866,6 +870,7 @@ static void io_init_new_fixed_worker(struct io_wqe *wqe,
 {
 	struct io_wqe_acct *acct = io_wqe_get_acct(worker);
 	struct io_wqe_acct *iw_acct = &worker->acct;
+	struct io_wqe_acct *exec_acct = &worker->exec_acct;
 	unsigned index = acct->index;
 	unsigned *nr_fixed;
 
@@ -878,6 +883,7 @@ static void io_init_new_fixed_worker(struct io_wqe *wqe,
 	iw_acct->index = index;
 	INIT_WQ_LIST(&iw_acct->work_list);
 	raw_spin_lock_init(&iw_acct->lock);
+	raw_spin_lock_init(&exec_acct->lock);
 	raw_spin_unlock(&acct->lock);
 }
 
