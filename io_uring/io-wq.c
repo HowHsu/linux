@@ -1285,38 +1285,53 @@ static bool io_acct_cancel_pending_work(struct io_wqe *wqe,
 	return false;
 }
 
-static void io_wqe_cancel_pending_work(struct io_wqe *wqe,
-				       struct io_cb_cancel_data *match)
+static void io_wqe_cancel_pending_work_fixed(struct io_wqe *wqe,
+					     struct io_cb_cancel_data *match,
+					     bool exec)
 {
 	int i, j;
 	struct io_wqe_acct *acct, *iw_acct;
 
-retry_public:
-	for (i = 0; i < IO_WQ_ACCT_NR; i++) {
-		acct = io_get_acct(wqe, i == 0, false);
-		if (io_acct_cancel_pending_work(wqe, acct, match)) {
-			if (match->cancel_all)
-				goto retry_public;
-			return;
-		}
-	}
-
-retry_private:
+retry:
 	for (i = 0; i < IO_WQ_ACCT_NR; i++) {
 		acct = io_get_acct(wqe, i == 0, true);
 		raw_spin_lock(&acct->lock);
 		for (j = 0; j < acct->nr_fixed; j++) {
-			iw_acct = &acct->fixed_workers[j]->acct;
+			if (exec)
+				iw_acct = &acct->fixed_workers[j]->acct;
+			else
+				iw_acct = &acct->fixed_workers[j]->exec_acct;
+
 			if (io_acct_cancel_pending_work(wqe, iw_acct, match)) {
 				if (match->cancel_all) {
 					raw_spin_unlock(&acct->lock);
-					goto retry_private;
+					goto retry;
 				}
 				break;
 			}
 		}
 		raw_spin_unlock(&acct->lock);
 	}
+}
+
+static void io_wqe_cancel_pending_work(struct io_wqe *wqe,
+				       struct io_cb_cancel_data *match)
+{
+	int i;
+	struct io_wqe_acct *acct;
+
+retry:
+	for (i = 0; i < IO_WQ_ACCT_NR; i++) {
+		acct = io_get_acct(wqe, i == 0, false);
+		if (io_acct_cancel_pending_work(wqe, acct, match)) {
+			if (match->cancel_all)
+				goto retry;
+			return;
+		}
+	}
+
+	io_wqe_cancel_pending_work_fixed(wqe, match, false);
+	io_wqe_cancel_pending_work_fixed(wqe, match, true);
 }
 
 static void io_wqe_cancel_running_work(struct io_wqe *wqe,
