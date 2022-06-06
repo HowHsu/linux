@@ -1372,7 +1372,12 @@ static int ipipe_prep(struct pipe_inode_info *pipe, unsigned int flags)
 		return 0;
 
 	ret = 0;
-	pipe_lock(pipe);
+	if (flags & SPLICE_F_NONBLOCK) {
+		if (!pipe_trylock(pipe))
+			return -EAGAIN;
+	} else {
+		pipe_lock(pipe);
+	}
 
 	while (pipe_empty(pipe->head, pipe->tail)) {
 		if (signal_pending(current)) {
@@ -1408,7 +1413,12 @@ static int opipe_prep(struct pipe_inode_info *pipe, unsigned int flags)
 		return 0;
 
 	ret = 0;
-	pipe_lock(pipe);
+	if (flags & SPLICE_F_NONBLOCK) {
+		if (!pipe_trylock(pipe))
+			return -EAGAIN;
+	} else {
+		pipe_lock(pipe);
+	}
 
 	while (pipe_full(pipe->head, pipe->tail, pipe->max_usage)) {
 		if (!pipe->readers) {
@@ -1460,7 +1470,12 @@ retry:
 	 * grabbing by pipe info address. Otherwise two different processes
 	 * could deadlock (one doing tee from A -> B, the other from B -> A).
 	 */
-	pipe_double_lock(ipipe, opipe);
+	if (flags & SPLICE_F_NONBLOCK) {
+		if (!pipe_double_trylock(ipipe, opipe))
+			return -EAGAIN;
+	} else {
+		pipe_double_lock(ipipe, opipe);
+	}
 
 	i_tail = ipipe->tail;
 	i_mask = ipipe->ring_size - 1;
