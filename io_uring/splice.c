@@ -86,6 +86,14 @@ int io_splice_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
 	return __io_splice_prep(req, sqe);
 }
 
+bool io_splice_support_nowait(struct file *in, struct file *out)
+{
+	if (get_pipe_info(in, true) && get_pipe_info(out, true))
+		return true;
+
+	return false;
+}
+
 int io_splice(struct io_kiocb *req, unsigned int issue_flags)
 {
 	struct io_splice *sp = io_kiocb_to_cmd(req);
@@ -95,9 +103,6 @@ int io_splice(struct io_kiocb *req, unsigned int issue_flags)
 	struct file *in;
 	long ret = 0;
 
-	if (issue_flags & IO_URING_F_NONBLOCK)
-		return -EAGAIN;
-
 	if (sp->flags & SPLICE_F_FD_IN_FIXED)
 		in = io_file_get_fixed(req, sp->splice_fd_in, issue_flags);
 	else
@@ -105,6 +110,11 @@ int io_splice(struct io_kiocb *req, unsigned int issue_flags)
 	if (!in) {
 		ret = -EBADF;
 		goto done;
+	}
+
+	if (issue_flags & IO_URING_F_NONBLOCK) {
+		if (!io_splice_support_nowait(in, out))
+			return -EAGAIN;
 	}
 
 	poff_in = (sp->off_in == -1) ? NULL : &sp->off_in;
