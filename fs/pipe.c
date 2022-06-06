@@ -98,6 +98,11 @@ void pipe_unlock(struct pipe_inode_info *pipe)
 }
 EXPORT_SYMBOL(pipe_unlock);
 
+int pipe_trylock(struct pipe_inode_info *pipe)
+{
+	return mutex_trylock(&pipe->mutex);
+}
+
 static inline void __pipe_lock(struct pipe_inode_info *pipe)
 {
 	mutex_lock_nested(&pipe->mutex, I_MUTEX_PARENT);
@@ -120,6 +125,30 @@ void pipe_double_lock(struct pipe_inode_info *pipe1,
 		pipe_lock_nested(pipe2, I_MUTEX_PARENT);
 		pipe_lock_nested(pipe1, I_MUTEX_CHILD);
 	}
+}
+
+int pipe_double_trylock(struct pipe_inode_info *pipe1,
+			 struct pipe_inode_info *pipe2)
+{
+	BUG_ON(pipe1 == pipe2);
+
+	if (pipe1 < pipe2) {
+		if (!pipe_trylock(pipe1))
+			return 0;
+		if (!pipe_trylock(pipe2)) {
+			pipe_unlock(pipe1);
+			return 0;
+		}
+	} else {
+		if (!pipe_trylock(pipe2))
+			return 0;
+		if (!pipe_trylock(pipe1)) {
+			pipe_unlock(pipe2);
+			return 0;
+		}
+	}
+
+	return 1;
 }
 
 static void anon_pipe_buf_release(struct pipe_inode_info *pipe,

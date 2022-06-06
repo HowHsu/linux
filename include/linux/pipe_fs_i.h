@@ -235,8 +235,10 @@ static inline bool pipe_buf_try_steal(struct pipe_inode_info *pipe,
 
 /* Pipe lock and unlock operations */
 void pipe_lock(struct pipe_inode_info *);
+int pipe_trylock(struct pipe_inode_info *);
 void pipe_unlock(struct pipe_inode_info *);
 void pipe_double_lock(struct pipe_inode_info *, struct pipe_inode_info *);
+int pipe_double_trylock(struct pipe_inode_info *, struct pipe_inode_info *);
 
 /* Wait for a pipe to be readable/writable while dropping the pipe lock */
 void pipe_wait_readable(struct pipe_inode_info *);
