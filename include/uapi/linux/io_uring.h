@@ -124,6 +124,7 @@ enum {
 #define IORING_SETUP_ATTACH_WQ	(1U << 5)	/* attach to existing wq */
 #define IORING_SETUP_R_DISABLED	(1U << 6)	/* start with ring disabled */
 #define IORING_SETUP_SUBMIT_ALL	(1U << 7)	/* continue submit on error */
+#define IORING_SETUP_SQPOOL	(1U << 8)	/* sqpool mode */
 /*
  * Cooperative task running. When requests complete, they often require
  * forcing the submitter to transition to the kernel to complete. If this

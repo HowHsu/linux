@@ -1,9 +1,17 @@
-// SPDX-License-Identifier: GPL-2.0
+#ifndef INTERNAL_TCTX_H
+#define INTERNAL_TCTX_H
 
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Arbitrary limit, can be raised if need be
  */
 #define IO_RINGFD_REG_MAX 16
+
+struct io_sqpool_data {
+	spinlock_t		lock;
+	struct list_head	ctx_list;
+	struct io_wq		*sq_pool;
+};
 
 struct io_uring_task {
 	/* submission side */
@@ -12,6 +20,7 @@ struct io_uring_task {
 	struct wait_queue_head	wait;
 	const struct io_ring_ctx *last;
 	struct io_wq		*io_wq;
+	struct io_sqpool_data	spd;
 	struct percpu_counter	inflight;
 	atomic_t		inflight_tracked;
 	atomic_t		in_idle;
@@ -45,11 +54,5 @@ int io_ringfd_unregister(struct io_ring_ctx *ctx, void __user *__arg,
 /*
  * Note that this task has used io_uring. We use it for cancelation purposes.
  */
-static inline int io_uring_add_tctx_node(struct io_ring_ctx *ctx)
-{
-	struct io_uring_task *tctx = current->io_uring;
-
-	if (likely(tctx && tctx->last == ctx))
-		return 0;
-	return __io_uring_add_tctx_node(ctx);
-}
+int io_uring_add_tctx_node(struct io_ring_ctx *ctx);
+#endif

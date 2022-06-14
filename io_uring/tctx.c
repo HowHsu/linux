@@ -9,12 +9,26 @@
 
 #include <uapi/linux/io_uring.h>
 
+#include "io-wq.h"
 #include "io_uring_types.h"
 #include "io_uring.h"
 #include "tctx.h"
 
+/*
+ * Note that this task has used io_uring. We use it for cancelation purposes.
+ */
+int io_uring_add_tctx_node(struct io_ring_ctx *ctx)
+{
+	struct io_uring_task *tctx = current->io_uring;
+
+	if (likely(tctx && tctx->last == ctx))
+		return 0;
+	return __io_uring_add_tctx_node(ctx);
+}
+
 static struct io_wq *io_init_wq_offload(struct io_ring_ctx *ctx,
-					struct task_struct *task)
+					struct task_struct *task,
+					io_worker_func_t io_worker_fn)
 {
 	struct io_wq_hash *hash;
 	struct io_wq_data data;
@@ -38,6 +52,7 @@ static struct io_wq *io_init_wq_offload(struct io_ring_ctx *ctx,
 	data.task = task;
 	data.free_work = io_wq_free_work;
 	data.do_work = io_wq_submit_work;
+	data.io_worker_fn = io_worker_fn;
 
 	/* Do QD, or 4 * CPUS, whatever is smallest */
 	concurrency = min(ctx->sq_entries, 4 * num_online_cpus());
@@ -49,6 +64,7 @@ __cold int io_uring_alloc_task_context(struct task_struct *task,
 				       struct io_ring_ctx *ctx)
 {
 	struct io_uring_task *tctx;
+	struct io_sqpool_data *spd;
 	int ret;
 
 	tctx = kzalloc(sizeof(*tctx), GFP_KERNEL);
@@ -69,15 +85,36 @@ __cold int io_uring_alloc_task_context(struct task_struct *task,
 		return ret;
 	}
 
-	tctx->io_wq = io_init_wq_offload(ctx, task);
-	if (IS_ERR(tctx->io_wq)) {
-		ret = PTR_ERR(tctx->io_wq);
-		percpu_counter_destroy(&tctx->inflight);
-		kfree(tctx->registered_rings);
-		kfree(tctx);
-		return ret;
-	}
+	spd = &tctx->spd;
+	if (!(task->flags & PF_IO_WORKER)) {
+		tctx->io_wq = io_init_wq_offload(ctx, task, io_wqe_worker);
+		if (IS_ERR(tctx->io_wq)) {
+			ret = PTR_ERR(tctx->io_wq);
+			percpu_counter_destroy(&tctx->inflight);
+			kfree(tctx->registered_rings);
+			kfree(tctx);
+			return ret;
+		}
 
+		if (ctx->flags & IORING_SETUP_SQPOOL) {
+
+			printk("create uring: task: %lx\n", task);
+			spd->sq_pool = io_init_wq_offload(ctx, task, io_sqp_worker);
+			if (IS_ERR(spd->sq_pool)) {
+				ret = PTR_ERR(spd->sq_pool);
+				percpu_counter_destroy(&tctx->inflight);
+				kfree(tctx->registered_rings);
+				kfree(tctx);
+				return ret;
+			}
+			spin_lock_init(&spd->lock);
+			INIT_LIST_HEAD(&spd->ctx_list);
+		}
+	} else {
+			printk("ok, we are in sqp-worker, no wq offload\n");
+			spin_lock_init(&spd->lock);
+			INIT_LIST_HEAD(&spd->ctx_list);
+	}
 	xa_init(&tctx->xa);
 	init_waitqueue_head(&tctx->wait);
 	atomic_set(&tctx->in_idle, 0);
@@ -112,6 +149,8 @@ int __io_uring_add_tctx_node(struct io_ring_ctx *ctx)
 		}
 	}
 	if (!xa_load(&tctx->xa, (unsigned long)ctx)) {
+		struct io_sqpool_data *spd;
+
 		node = kmalloc(sizeof(*node), GFP_KERNEL);
 		if (!node)
 			return -ENOMEM;
@@ -128,6 +167,15 @@ int __io_uring_add_tctx_node(struct io_ring_ctx *ctx)
 		mutex_lock(&ctx->uring_lock);
 		list_add(&node->ctx_node, &ctx->tctx_list);
 		mutex_unlock(&ctx->uring_lock);
+
+		if (!(current->flags & PF_IO_WORKER)) {
+			spd = &tctx->spd;
+			spin_lock(&spd->lock);
+			list_add(&ctx->sqd_list, &spd->ctx_list);
+			spin_unlock(&spd->lock);
+			ctx->spd = spd;
+			printk("ctx add to spd->ctx_list: %lx\n", ctx);
+		}
 	}
 	tctx->last = ctx;
 	return 0;
@@ -162,6 +210,7 @@ __cold void io_uring_del_tctx_node(unsigned long index)
 __cold void io_uring_clean_tctx(struct io_uring_task *tctx)
 {
 	struct io_wq *wq = tctx->io_wq;
+	struct io_wq *sqp = tctx->spd.sq_pool;
 	struct io_tctx_node *node;
 	unsigned long index;
 
@@ -177,6 +226,15 @@ __cold void io_uring_clean_tctx(struct io_uring_task *tctx)
 		io_wq_put_and_exit(wq);
 		tctx->io_wq = NULL;
 	}
+	if (sqp) {
+		/*
+		 * Must be after io_uring_del_tctx_node() (removes nodes under
+		 * uring_lock) to avoid race with io_uring_try_cancel_iowq().
+		 */
+		io_wq_put_and_exit(sqp);
+		tctx->spd.sq_pool = NULL;
+	}
+
 }
 
 void io_uring_unreg_ringfd(void)

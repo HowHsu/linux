@@ -779,6 +779,7 @@ int io_read(struct io_kiocb *req, unsigned int issue_flags)
 	ssize_t ret, ret2;
 	loff_t *ppos;
 
+	force_nonblock = false;
 	if (!req_has_async_data(req)) {
 		ret = io_import_iovec(READ, req, &iovec, s, issue_flags);
 		if (unlikely(ret < 0))

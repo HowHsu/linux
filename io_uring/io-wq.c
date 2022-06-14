@@ -15,9 +15,14 @@
 #include <linux/cpu.h>
 #include <linux/task_work.h>
 #include <linux/audit.h>
+#include <linux/file.h>
+#include <linux/io_uring.h>
 #include <uapi/linux/io_uring.h>
 
+#include "io_uring_types.h"
+#include "io_uring.h"
 #include "io-wq.h"
+#include "tctx.h"
 
 #define WORKER_IDLE_TIMEOUT	(5 * HZ)
 
@@ -124,7 +129,7 @@ struct io_wq {
 	struct hlist_node cpuhp_node;
 
 	struct task_struct *task;
-
+	io_worker_func_t io_worker_fn;
 	struct io_wqe *wqes[];
 };
 
@@ -394,15 +399,50 @@ static void io_wqe_dec_running(struct io_worker *worker)
 {
 	struct io_wqe_acct *acct = io_wqe_get_acct(worker);
 	struct io_wqe *wqe = worker->wqe;
+	struct io_wq *wq = wqe->wq;
 
 	if (!(worker->flags & IO_WORKER_F_UP))
 		return;
 
 	if (!atomic_dec_and_test(&acct->nr_running))
 		return;
-	if (!io_acct_run_queue(acct))
-		return;
+	if (wq->io_worker_fn == io_wqe_worker) {
+		if (!io_acct_run_queue(acct))
+			return;
+	} else {
+		struct io_sqpool_data *spd = &wq->task->io_uring->spd;
+		struct io_ring_ctx *ctx;
+		struct io_wqe_acct *acct = io_wqe_get_acct(worker);
+		bool has_sqes = false, waken;
 
+		spin_lock(&spd->lock);
+		list_for_each_entry(ctx, &spd->ctx_list, sqd_list) {
+			if (io_sqring_entries(ctx)) {
+				has_sqes = true;
+				break;
+			}
+		}
+		spin_unlock(&spd->lock);
+
+		if (!has_sqes) {
+			printk("no sqes, just sleep\n");
+			return;
+		}
+		/*
+		raw_spin_lock(&wqe->lock);
+		rcu_read_lock();
+		waken = io_wqe_activate_free_worker(wqe, acct);
+		rcu_read_unlock();
+		raw_spin_unlock(&wqe->lock);
+
+		if (waken) {
+			printk("waked a free worker\n");
+			return;
+		}
+		*/
+
+	}
+	printk("created a new worker\n");
 	atomic_inc(&acct->nr_running);
 	atomic_inc(&wqe->wq->worker_refs);
 	io_queue_worker_create(worker, acct, create_worker_cb);
@@ -620,7 +660,7 @@ static void io_worker_handle_work(struct io_worker *worker)
 	} while (1);
 }
 
-static int io_wqe_worker(void *data)
+int io_wqe_worker(void *data)
 {
 	struct io_worker *worker = data;
 	struct io_wqe_acct *acct = io_wqe_get_acct(worker);
@@ -689,6 +729,8 @@ void io_wq_worker_running(struct task_struct *tsk)
 	if (worker->flags & IO_WORKER_F_RUNNING)
 		return;
 	worker->flags |= IO_WORKER_F_RUNNING;
+	printk("sqp:%ld scheduled in\n", current->pid);
+	//dump_stack();
 	io_wqe_inc_running(worker);
 }
 
@@ -707,6 +749,8 @@ void io_wq_worker_sleeping(struct task_struct *tsk)
 	if (!(worker->flags & IO_WORKER_F_RUNNING))
 		return;
 
+	printk("sqp:%ld scheduled out\n", current->pid);
+	//dump_stack();
 	worker->flags &= ~IO_WORKER_F_RUNNING;
 	io_wqe_dec_running(worker);
 }
@@ -757,11 +801,13 @@ static void create_worker_cont(struct callback_head *cb)
 	struct io_worker *worker;
 	struct task_struct *tsk;
 	struct io_wqe *wqe;
+	struct io_wq *wq;
 
 	worker = container_of(cb, struct io_worker, create_work);
 	clear_bit_unlock(0, &worker->create_state);
 	wqe = worker->wqe;
-	tsk = create_io_thread(io_wqe_worker, worker, wqe->node);
+	wq = wqe->wq;
+	tsk = create_io_thread(wq->io_worker_fn, worker, wqe->node);
 	if (!IS_ERR(tsk)) {
 		io_init_new_worker(wqe, worker, tsk);
 		io_worker_release(worker);
@@ -830,7 +876,7 @@ fail:
 	if (index == IO_WQ_ACCT_BOUND)
 		worker->flags |= IO_WORKER_F_BOUND;
 
-	tsk = create_io_thread(io_wqe_worker, worker, wqe->node);
+	tsk = create_io_thread(wq->io_worker_fn, worker, wqe->node);
 	if (!IS_ERR(tsk)) {
 		io_init_new_worker(wqe, worker, tsk);
 	} else if (!io_should_retry_thread(PTR_ERR(tsk))) {
@@ -1166,6 +1212,7 @@ struct io_wq *io_wq_create(unsigned bounded, struct io_wq_data *data)
 	wq->hash = data->hash;
 	wq->free_work = data->free_work;
 	wq->do_work = data->do_work;
+	wq->io_worker_fn = data->io_worker_fn;
 
 	ret = -ENOMEM;
 	for_each_node(node) {
@@ -1217,6 +1264,79 @@ err:
 err_wq:
 	kfree(wq);
 	return ERR_PTR(ret);
+}
+
+static int submit_ctx(struct io_ring_ctx *ctx)
+{
+	unsigned int to_submit;
+	int ret = 0;
+
+	to_submit = io_sqring_entries(ctx);
+	if (!to_submit)
+		return ret;
+
+	if (to_submit && likely(!percpu_ref_is_dying(&ctx->refs)) &&
+	    !(ctx->flags & IORING_SETUP_R_DISABLED)) {
+		ret = io_uring_add_tctx_node(ctx);
+		if (unlikely(ret))
+			return ret;
+
+		ret = io_submit_sqes(ctx, to_submit);
+	}
+
+	return ret;
+}
+
+int io_sqp_worker(void *data) {
+	struct io_worker *worker = data;
+	struct io_wqe_acct *acct = io_wqe_get_acct(worker);
+	struct io_wqe *wqe = worker->wqe;
+	struct io_wq *wq = wqe->wq;
+	struct io_sqpool_data *spd = &wq->task->io_uring->spd;
+	struct io_ring_ctx *ctx;
+	char buf[TASK_COMM_LEN];
+	bool need_sched;
+
+	worker->flags |= (IO_WORKER_F_UP | IO_WORKER_F_RUNNING);
+
+	snprintf(buf, sizeof(buf), "iou-sqp-%d", wq->task->pid);
+	set_task_comm(current, buf);
+
+	printk("iou-sqp: %lx\n", current->pid);
+
+	while (!test_bit(IO_WQ_BIT_EXIT, &wq->state)) {
+		spin_lock(&spd->lock);
+		list_for_each_entry(ctx, &spd->ctx_list, sqd_list) {
+			spin_unlock(&spd->lock);
+			printk("ctx addr: %lx\n", ctx);
+			submit_ctx(ctx);
+			spin_lock(&spd->lock);
+		}
+		spin_unlock(&spd->lock);
+
+		need_sched = true;
+		set_current_state(TASK_INTERRUPTIBLE);
+		spin_lock(&spd->lock);
+		list_for_each_entry(ctx, &spd->ctx_list, sqd_list) {
+			spin_unlock(&spd->lock);
+			if (io_sqring_entries(ctx)) {
+				need_sched = false;
+				break;
+			}
+			spin_lock(&spd->lock);
+		}
+		// race here
+		if (need_sched) {
+			spin_unlock(&spd->lock);
+			printk("iou-sqp: %lx is being free\n", current->pid);
+			__io_worker_idle(wqe, worker);
+			schedule();
+			printk("iou-sqp: %lx is being busy\n", current->pid);
+		}
+	}
+	printk("iou-sqp: %lx is exiting\n", current->pid);
+	io_worker_exit(worker);
+	return 0;
 }
 
 static bool io_task_work_match(struct callback_head *cb, void *data)
@@ -1408,6 +1528,34 @@ int io_wq_max_workers(struct io_wq *wq, int *new_count)
 		new_count[i] = prev[i];
 
 	return 0;
+}
+
+bool spd_needs_new_thread(struct io_sqpool_data *spd)
+{
+	struct io_wq *wq = spd->sq_pool;
+	struct io_wqe *wqe = wq->wqes[numa_node_id()];
+	struct io_wqe_acct *acct = io_get_acct(wqe, true);
+	bool do_create;
+
+	if (atomic_read(&acct->nr_running))
+		return false;
+	raw_spin_lock(&wqe->lock);
+	rcu_read_lock();
+	do_create = !io_wqe_activate_free_worker(wqe, acct);
+	rcu_read_unlock();
+	raw_spin_unlock(&wqe->lock);
+
+	return do_create;
+}
+
+void handle_sqpool(struct io_sqpool_data *spd)
+{
+	if (spd_needs_new_thread(spd)) {
+		struct io_wqe *wqe = spd->sq_pool->wqes[numa_node_id()];
+		struct io_wqe_acct *acct = io_get_acct(wqe, true);
+		// TODO: what if it fails?
+		io_wqe_create_worker(wqe, acct);
+	}
 }
 
 static __init int io_wq_init(void)

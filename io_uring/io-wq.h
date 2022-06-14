@@ -4,6 +4,9 @@
 #include <linux/refcount.h>
 
 struct io_wq;
+struct io_sqpool_data;
+int io_wqe_worker(void *data);
+int io_sqp_worker(void *data);
 
 enum {
 	IO_WQ_WORK_CANCEL	= 1,
@@ -181,14 +184,17 @@ static inline void io_wq_put_hash(struct io_wq_hash *hash)
 		kfree(hash);
 }
 
+typedef int (*io_worker_func_t)(void *);
 struct io_wq_data {
 	struct io_wq_hash *hash;
 	struct task_struct *task;
 	io_wq_work_fn *do_work;
 	free_work_fn *free_work;
+	io_worker_func_t io_worker_fn;
 };
 
 struct io_wq *io_wq_create(unsigned bounded, struct io_wq_data *data);
+struct io_wq *io_sqpool_create(unsigned bounded, struct io_wq_data *data);
 void io_wq_exit_start(struct io_wq *wq);
 void io_wq_put_and_exit(struct io_wq *wq);
 
@@ -225,4 +231,6 @@ static inline bool io_wq_current_is_worker(void)
 	return in_task() && (current->flags & PF_IO_WORKER) &&
 		current->worker_private;
 }
+
+void handle_sqpool(struct io_sqpool_data *spd);
 #endif

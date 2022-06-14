@@ -195,6 +195,7 @@ struct io_ring_ctx {
 
 	const struct cred	*sq_creds;	/* cred used for __io_sq_thread() */
 	struct io_sq_data	*sq_data;	/* if using sq thread polling */
+	struct io_sqpool_data	*spd;
 
 	struct wait_queue_head	sqo_sq_wait;
 	struct list_head	sqd_list;
@@ -507,5 +508,4 @@ struct io_mapped_ubuf {
 	unsigned long	acct_pages;
 	struct bio_vec	bvec[];
 };
-
 #endif

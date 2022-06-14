@@ -2320,7 +2320,8 @@ static inline void io_queue_sqe(struct io_kiocb *req)
 {
 	int ret;
 
-	ret = io_issue_sqe(req, IO_URING_F_NONBLOCK|IO_URING_F_COMPLETE_DEFER);
+//	ret = io_issue_sqe(req, IO_URING_F_NONBLOCK|IO_URING_F_COMPLETE_DEFER);
+	ret = io_issue_sqe(req, IO_URING_F_UNLOCKED);
 
 	if (req->flags & REQ_F_COMPLETE_INLINE) {
 		io_req_add_compl_list(req);
@@ -2332,8 +2333,10 @@ static inline void io_queue_sqe(struct io_kiocb *req)
 	 */
 	if (likely(!ret))
 		io_arm_ltimeout(req);
-	else
+	else {
+		printk("go to the arm poll or iowq way, wrong!\n");
 		io_queue_async(req, ret);
+	}
 }
 
 static void io_queue_sqe_fallback(struct io_kiocb *req)
@@ -2539,6 +2542,7 @@ static inline int io_submit_sqe(struct io_ring_ctx *ctx, struct io_kiocb *req,
 	struct io_submit_link *link = &ctx->submit_state.link;
 	int ret;
 
+	printk("iou-sqp: %lx, user_data: %lld\n", current->pid, sqe->user_data);
 	ret = io_init_req(ctx, req, sqe);
 	if (unlikely(ret))
 		return io_submit_fail_init(sqe, req, ret);
@@ -2668,20 +2672,20 @@ int io_submit_sqes(struct io_ring_ctx *ctx, unsigned int nr)
 	__must_hold(&ctx->uring_lock)
 {
 	unsigned int entries = io_sqring_entries(ctx);
-	unsigned int left;
 	int ret;
 
 	if (unlikely(!entries))
 		return 0;
 	/* make sure SQ entry isn't read before tail */
-	ret = left = min3(nr, ctx->sq_entries, entries);
-	io_get_task_refs(left);
-	io_submit_state_start(&ctx->submit_state, left);
+	ret = min3(nr, ctx->sq_entries, entries);
+	io_submit_state_start(&ctx->submit_state, ret);
 
 	do {
 		const struct io_uring_sqe *sqe;
 		struct io_kiocb *req;
 
+		if (!io_sqring_entries(ctx))
+			break;
 		if (unlikely(!io_alloc_req_refill(ctx)))
 			break;
 		req = io_alloc_req(ctx);
@@ -2695,20 +2699,9 @@ int io_submit_sqes(struct io_ring_ctx *ctx, unsigned int nr)
 		 * Continue submitting even for sqe failure if the
 		 * ring was setup with IORING_SETUP_SUBMIT_ALL
 		 */
-		if (unlikely(io_submit_sqe(ctx, req, sqe)) &&
-		    !(ctx->flags & IORING_SETUP_SUBMIT_ALL)) {
-			left--;
-			break;
-		}
-	} while (--left);
-
-	if (unlikely(left)) {
-		ret -= left;
-		/* try again if it submitted nothing and can't allocate a req */
-		if (!ret && io_req_cache_empty(ctx))
-			ret = -EAGAIN;
-		current->io_uring->cached_refs += left;
-	}
+		io_get_task_refs(1);
+		io_submit_sqe(ctx, req, sqe);
+	} while (1);
 
 	io_submit_state_end(ctx);
 	 /* Commit SQ ring head once we've consumed and submitted all SQEs */
@@ -2860,6 +2853,7 @@ void __io_uring_free(struct task_struct *tsk)
 
 	WARN_ON_ONCE(!xa_empty(&tctx->xa));
 	WARN_ON_ONCE(tctx->io_wq);
+	WARN_ON_ONCE(tctx->spd.sq_pool);
 	WARN_ON_ONCE(tctx->cached_refs);
 
 	kfree(tctx->registered_rings);
@@ -3390,6 +3384,8 @@ __cold void io_uring_cancel_generic(bool cancel_all, struct io_sq_data *sqd)
 		return;
 	if (tctx->io_wq)
 		io_wq_exit_start(tctx->io_wq);
+	if (tctx->spd.sq_pool)
+		io_wq_exit_start(tctx->spd.sq_pool);
 
 	atomic_inc(&tctx->in_idle);
 	do {
@@ -3615,7 +3611,15 @@ SYSCALL_DEFINE6(io_uring_enter, unsigned int, fd, u32, to_submit,
 	 * we were asked to.
 	 */
 	ret = 0;
-	if (ctx->flags & IORING_SETUP_SQPOLL) {
+	if (to_submit && (ctx->flags & IORING_SETUP_SQPOOL)) {
+		ret = io_uring_add_tctx_node(ctx);
+		if (unlikely(ret))
+			goto out;
+
+		io_cqring_overflow_flush(ctx);
+		handle_sqpool(ctx->spd);
+		return to_submit;
+	} else if (ctx->flags & IORING_SETUP_SQPOLL) {
 		io_cqring_overflow_flush(ctx);
 
 		if (unlikely(ctx->sq_data->thread == NULL)) {
