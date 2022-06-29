@@ -704,6 +704,26 @@ void io_wq_worker_sleeping(struct task_struct *tsk)
 	io_wqe_dec_running(worker);
 }
 
+int io_uringlet_offload(struct io_wq *wq)
+{
+	struct io_wqe *wqe = wq->wqes[numa_node_id()];
+	struct io_wqe_acct *acct = io_get_acct(wqe, true);
+	bool create;
+
+	if (atomic_read(&acct->nr_running))
+		return 0;
+	raw_spin_lock(&wqe->lock);
+	rcu_read_lock();
+	create = !io_wqe_activate_free_worker(wqe, acct);
+	rcu_read_unlock();
+	raw_spin_unlock(&wqe->lock);
+
+	if (!create || atomic_read(&acct->nr_running))
+		return 0;
+
+	return io_wqe_create_worker(wqe, acct);
+}
+
 static void io_init_new_worker(struct io_wqe *wqe, struct io_worker *worker,
 			       struct task_struct *tsk)
 {

@@ -3083,15 +3083,22 @@ SYSCALL_DEFINE6(io_uring_enter, unsigned int, fd, u32, to_submit,
 		if (unlikely(ret))
 			goto out;
 
-		mutex_lock(&ctx->uring_lock);
-		ret = io_submit_sqes(ctx, to_submit);
-		if (ret != to_submit) {
+		if (!(ctx->flags & IORING_SETUP_URINGLET)) {
+			mutex_lock(&ctx->uring_lock);
+			ret = io_submit_sqes(ctx, to_submit);
+			if (ret != to_submit) {
+				mutex_unlock(&ctx->uring_lock);
+				goto out;
+			}
+			if ((flags & IORING_ENTER_GETEVENTS) &&
+			    ctx->syscall_iopoll)
+				goto iopoll_locked;
 			mutex_unlock(&ctx->uring_lock);
-			goto out;
+		} else {
+			ret = io_uringlet_offload(ctx->let);
+			if (ret)
+				goto out;
 		}
-		if ((flags & IORING_ENTER_GETEVENTS) && ctx->syscall_iopoll)
-			goto iopoll_locked;
-		mutex_unlock(&ctx->uring_lock);
 	}
 	if (flags & IORING_ENTER_GETEVENTS) {
 		int ret2;

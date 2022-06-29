@@ -84,4 +84,5 @@ static inline bool io_wq_current_is_worker(void)
 
 extern struct io_wq *io_init_wq_offload(struct io_ring_ctx *ctx,
 					struct task_struct *task);
+extern int io_uringlet_offload(struct io_wq *wq);
 #endif
