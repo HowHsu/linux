@@ -140,7 +140,7 @@ struct io_cb_cancel_data {
 	bool cancel_all;
 };
 
-static bool create_io_worker(struct io_wq *wq, struct io_wqe *wqe, int index);
+static int create_io_worker(struct io_wq *wq, struct io_wqe *wqe, int index);
 static void io_wqe_dec_running(struct io_worker *worker);
 static bool io_acct_cancel_pending_work(struct io_wqe *wqe,
 					struct io_wqe_acct *acct,
@@ -289,7 +289,7 @@ static bool io_wqe_activate_free_worker(struct io_wqe *wqe,
  * We need a worker. If we find a free one, we're good. If not, and we're
  * below the max number of workers, create one.
  */
-static bool io_wqe_create_worker(struct io_wqe *wqe, struct io_wqe_acct *acct)
+static int io_wqe_create_worker(struct io_wqe *wqe, struct io_wqe_acct *acct)
 {
 	/*
 	 * Most likely an attempt to queue unbounded work on an io_wq that
@@ -301,7 +301,7 @@ static bool io_wqe_create_worker(struct io_wqe *wqe, struct io_wqe_acct *acct)
 	raw_spin_lock(&wqe->lock);
 	if (acct->nr_workers >= acct->max_workers) {
 		raw_spin_unlock(&wqe->lock);
-		return true;
+		return 0;
 	}
 	acct->nr_workers++;
 	raw_spin_unlock(&wqe->lock);
@@ -793,7 +793,7 @@ static void io_workqueue_create(struct work_struct *work)
 		kfree(worker);
 }
 
-static bool create_io_worker(struct io_wq *wq, struct io_wqe *wqe, int index)
+static int create_io_worker(struct io_wq *wq, struct io_wqe *wqe, int index)
 {
 	struct io_wqe_acct *acct = &wqe->acct[index];
 	struct io_worker *worker;
@@ -809,7 +809,7 @@ fail:
 		acct->nr_workers--;
 		raw_spin_unlock(&wqe->lock);
 		io_worker_ref_put(wq);
-		return false;
+		return -ENOMEM;
 	}
 
 	refcount_set(&worker->ref, 1);
@@ -831,7 +831,7 @@ fail:
 		schedule_work(&worker->work);
 	}
 
-	return true;
+	return 0;
 }
 
 /*
@@ -936,7 +936,7 @@ static void io_wqe_enqueue(struct io_wqe *wqe, struct io_wq_work *work)
 	    !atomic_read(&acct->nr_running))) {
 		bool did_create;
 
-		did_create = io_wqe_create_worker(wqe, acct);
+		did_create = !io_wqe_create_worker(wqe, acct);
 		if (likely(did_create))
 			return;
 
