@@ -637,21 +637,11 @@ static void io_worker_handle_work(struct io_worker *worker)
 	} while (1);
 }
 
-static int io_wqe_worker(void *data)
+static int io_wqe_worker_normal(struct io_worker * worker,
+				struct io_wqe_acct *acct, struct io_wqe *wqe,
+				struct io_wq *wq)
 {
-	struct io_worker *worker = data;
-	struct io_wqe_acct *acct = io_wqe_get_acct(worker);
-	struct io_wqe *wqe = worker->wqe;
-	struct io_wq *wq = wqe->wq;
 	bool last_timeout = false;
-	char buf[TASK_COMM_LEN];
-
-	worker->flags |= (IO_WORKER_F_UP | IO_WORKER_F_RUNNING);
-
-	snprintf(buf, sizeof(buf), "iou-wrk-%d", wq->task->pid);
-	set_task_comm(current, buf);
-
-	audit_alloc_kernel(current);
 
 	while (!test_bit(IO_WQ_BIT_EXIT, &wq->state)) {
 		long ret;
@@ -686,6 +676,76 @@ static int io_wqe_worker(void *data)
 
 	if (test_bit(IO_WQ_BIT_EXIT, &wq->state))
 		io_worker_handle_work(worker);
+
+	return 0;
+}
+
+static int io_wqe_worker_let(struct io_worker * worker,
+			     struct io_wqe_acct *acct, struct io_wqe *wqe,
+			     struct io_wq *wq)
+{
+	while (!test_bit(IO_WQ_BIT_EXIT, &wq->state)) {
+		long ret;
+		unsigned int to_submit;
+		bool last_timeout = false;
+		struct io_ring_ctx *ctx = wq->ctx;
+
+		__io_worker_busy(wqe, worker);
+		set_current_state(TASK_INTERRUPTIBLE);
+
+		while (to_submit = io_sqring_entries(ctx)) {
+			if (to_submit && likely(!percpu_ref_is_dying(&ctx->refs))
+			    && !(ctx->flags & IORING_SETUP_R_DISABLED))
+				io_submit_sqes(ctx, to_submit);
+		}
+
+		raw_spin_lock(&wqe->lock);
+		if (last_timeout && acct->nr_workers > 1) {
+			acct->nr_workers--;
+			raw_spin_unlock(&wqe->lock);
+			__set_current_state(TASK_RUNNING);
+			break;
+		}
+		last_timeout = false;
+		__io_worker_idle(wqe, worker);
+		raw_spin_unlock(&wqe->lock);
+		if (io_run_task_work())
+			continue;
+		ret = schedule_timeout(WORKER_IDLE_TIMEOUT);
+		if (signal_pending(current)) {
+			struct ksignal ksig;
+
+			if (!get_signal(&ksig))
+				continue;
+			break;
+		}
+		last_timeout = !ret;
+	}
+
+	return 0;
+}
+
+static int io_wqe_worker(void *data)
+{
+	struct io_worker *worker = data;
+	struct io_wqe_acct *acct = io_wqe_get_acct(worker);
+	struct io_wqe *wqe = worker->wqe;
+	struct io_wq *wq = wqe->wq;
+	char buf[TASK_COMM_LEN];
+	bool uringlet = io_wq_is_let(wq);
+
+	worker->flags |= (IO_WORKER_F_UP | IO_WORKER_F_RUNNING);
+
+	snprintf(buf, sizeof(buf), uringlet ? "iou-let-%d" : "iou-wrk-%d",
+		 wq->task->pid);
+	set_task_comm(current, buf);
+
+	audit_alloc_kernel(current);
+
+	if (uringlet)
+		io_wqe_worker_let(worker, acct, wqe, wq);
+	else
+		io_wqe_worker_normal(worker, acct, wqe, wq);
 
 	audit_free(current);
 	io_worker_exit(worker);
