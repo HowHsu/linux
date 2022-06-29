@@ -127,6 +127,8 @@ struct io_wq {
 
 	struct task_struct *task;
 
+	void *private;
+
 	struct io_wqe *wqes[];
 };
 
@@ -390,6 +392,11 @@ fail:
 	atomic_dec(&acct->nr_running);
 	io_worker_ref_put(wq);
 	return false;
+}
+
+static inline bool io_wq_is_uringlet(struct io_wq *wq)
+{
+	return wq->private;
 }
 
 static void io_wqe_dec_running(struct io_worker *worker)
@@ -1153,6 +1160,7 @@ struct io_wq *io_wq_create(unsigned bounded, struct io_wq_data *data)
 	wq->hash = data->hash;
 	wq->free_work = data->free_work;
 	wq->do_work = data->do_work;
+	wq->private = data->private;
 
 	ret = -ENOMEM;
 	for_each_node(node) {
@@ -1188,7 +1196,8 @@ struct io_wq *io_wq_create(unsigned bounded, struct io_wq_data *data)
 		INIT_LIST_HEAD(&wqe->all_list);
 	}
 
-	wq->task = get_task_struct(data->task);
+	if (data->task)
+		wq->task = get_task_struct(data->task);
 	atomic_set(&wq->worker_refs, 1);
 	init_completion(&wq->worker_done);
 	return wq;
