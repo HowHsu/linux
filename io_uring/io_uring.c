@@ -3311,8 +3311,6 @@ static __cold int io_uring_create(unsigned entries, struct io_uring_params *p,
 	struct file *file;
 	int ret;
 
-	if (p->flags & IORING_SETUP_URINGLET)
-		return -EINVAL;
 	if (!entries)
 		return -EINVAL;
 	if (entries > IORING_MAX_ENTRIES) {
