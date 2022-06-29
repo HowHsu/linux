@@ -3352,6 +3352,15 @@ static __cold int io_uring_create(unsigned entries, struct io_uring_params *p,
 	ret = io_sq_offload_create(ctx, p);
 	if (ret)
 		goto err;
+
+	if (ctx->flags & IORING_SETUP_URINGLET) {
+		ctx->let = io_init_wq_offload(ctx, current);
+		if (IS_ERR(ctx->let)) {
+			ret = PTR_ERR(ctx->let);
+			goto err;
+		}
+	}
+
 	/* always set a rsrc node */
 	ret = io_rsrc_node_switch_start(ctx);
 	if (ret)

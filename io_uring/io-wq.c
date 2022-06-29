@@ -127,7 +127,10 @@ struct io_wq {
 
 	struct task_struct *task;
 
+	struct io_ring_ctx *ctx;
+
 	struct io_wqe *wqes[];
+
 };
 
 static enum cpuhp_state io_wq_online;
@@ -1156,6 +1159,7 @@ struct io_wq *io_wq_create(unsigned bounded, struct io_wq_data *data)
 	wq->hash = data->hash;
 	wq->free_work = data->free_work;
 	wq->do_work = data->do_work;
+	wq->ctx = data->ctx;
 
 	ret = -ENOMEM;
 	for_each_node(node) {

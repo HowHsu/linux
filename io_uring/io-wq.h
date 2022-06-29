@@ -41,6 +41,7 @@ struct io_wq_data {
 	struct task_struct *task;
 	io_wq_work_fn *do_work;
 	free_work_fn *free_work;
+	struct io_ring_ctx *ctx;
 };
 
 struct io_wq *io_wq_create(unsigned bounded, struct io_wq_data *data);
@@ -80,4 +81,7 @@ static inline bool io_wq_current_is_worker(void)
 	return in_task() && (current->flags & PF_IO_WORKER) &&
 		current->worker_private;
 }
+
+extern struct io_wq *io_init_wq_offload(struct io_ring_ctx *ctx,
+					struct task_struct *task);
 #endif
