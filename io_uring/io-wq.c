@@ -395,18 +395,42 @@ fail:
 	return false;
 }
 
+static inline bool io_wq_is_let(struct io_wq *wq)
+{
+	return wq->ctx->flags & IORING_SETUP_URINGLET;
+}
+
+static inline bool io_wq_has_reqs(struct io_wq *wq)
+{
+	return io_sqring_entries(wq->ctx);
+}
+
 static void io_wqe_dec_running(struct io_worker *worker)
 {
 	struct io_wqe_acct *acct = io_wqe_get_acct(worker);
 	struct io_wqe *wqe = worker->wqe;
+	struct io_wq *wq = wqe->wq;
 
 	if (!(worker->flags & IO_WORKER_F_UP))
 		return;
 
 	if (!atomic_dec_and_test(&acct->nr_running))
 		return;
-	if (!io_acct_run_queue(acct))
-		return;
+	if (io_wq_is_let(wq)) {
+		bool activated;
+
+		if (!io_wq_has_reqs(wq))
+			return;
+
+		rcu_read_lock();
+		activated = io_wqe_activate_free_worker(wqe, acct);
+		rcu_read_unlock();
+		if (activated)
+			return;
+	} else {
+		if (!io_acct_run_queue(acct))
+			return;
+	}
 
 	atomic_inc(&acct->nr_running);
 	atomic_inc(&wqe->wq->worker_refs);
