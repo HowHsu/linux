@@ -144,6 +144,10 @@ enum {
  * Only one task is allowed to submit requests
  */
 #define IORING_SETUP_SINGLE_ISSUER	(1U << 12)
+/*
+ * uringlet mode
+ */
+#define IORING_SETUP_URINGLET		(1U << 13)
 
 enum io_uring_op {
 	IORING_OP_NOP,
