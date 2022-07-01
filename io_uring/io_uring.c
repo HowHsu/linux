@@ -602,6 +602,14 @@ static bool io_cqring_overflow_flush(struct io_ring_ctx *ctx)
 	return ret;
 }
 
+static void __io_get_task(struct task_struct *task, int nr)
+{
+	struct io_uring_task *tctx = task->io_uring;
+
+	percpu_counter_add(&tctx->inflight, nr);
+	refcount_add(nr, &task->usage);
+}
+
 static void __io_put_task(struct task_struct *task, int nr)
 {
 	struct io_uring_task *tctx = task->io_uring;
@@ -2168,6 +2176,37 @@ int io_submit_sqes(struct io_ring_ctx *ctx, unsigned int nr)
 	 /* Commit SQ ring head once we've consumed and submitted all SQEs */
 	io_commit_sqring(ctx);
 	return ret;
+}
+
+void io_submit_sqes_let(struct io_ring_ctx *ctx)
+{
+	unsigned int entries = io_sqring_entries(ctx);
+
+	__io_get_task(current, entries);
+	io_submit_state_start(&ctx->submit_state, entries);
+	do {
+		const struct io_uring_sqe *sqe;
+		struct io_kiocb *req;
+
+		if (unlikely(!io_alloc_req_refill(ctx)))
+			break;
+		req = io_alloc_req(ctx);
+		sqe = io_get_sqe(ctx);
+		if (unlikely(!sqe)) {
+			io_req_add_to_cache(req, ctx);
+			break;
+		}
+
+		if (unlikely(io_submit_sqe(ctx, req, sqe)))
+			break;
+		entries--;
+	} while (io_sqring_entries(ctx));
+
+	if (entries)
+		__io_put_task(current, entries);
+	io_submit_state_end(ctx);
+	 /* Commit SQ ring head once we've consumed and submitted all SQEs */
+	io_commit_sqring(ctx);
 }
 
 struct io_wait_queue {

@@ -701,7 +701,7 @@ static int io_wqe_worker_let(struct io_worker * worker,
 		while (to_submit = io_sqring_entries(ctx)) {
 			if (to_submit && likely(!percpu_ref_is_dying(&ctx->refs))
 			    && !(ctx->flags & IORING_SETUP_R_DISABLED))
-				io_submit_sqes(ctx, to_submit);
+				io_submit_sqes_let(ctx);
 		}
 
 		raw_spin_lock(&wqe->lock);
