@@ -28,6 +28,7 @@ enum {
 	IO_WORKER_F_RUNNING	= 2,	/* account as running */
 	IO_WORKER_F_FREE	= 4,	/* worker on free list */
 	IO_WORKER_F_BOUND	= 8,	/* is doing bounded work */
+	IO_WORKER_F_SLEEP	= 16,	/* sleep due to no work */
 };
 
 enum {
@@ -422,6 +423,10 @@ static void io_wqe_dec_running(struct io_worker *worker)
 		if (!io_wq_has_reqs(wq))
 			return;
 
+		if (worker->flags & IO_WORKER_F_SLEEP) {
+			__set_current_state(TASK_RUNNING);
+			return;
+		}
 		rcu_read_lock();
 		activated = io_wqe_activate_free_worker(wqe, acct);
 		rcu_read_unlock();
@@ -711,6 +716,7 @@ static int io_wqe_worker_let(struct io_worker * worker,
 		raw_spin_unlock(&wqe->lock);
 		if (io_run_task_work())
 			continue;
+		worker->flags |= IO_WORKER_F_SLEEP;
 		ret = schedule_timeout(WORKER_IDLE_TIMEOUT);
 		if (signal_pending(current)) {
 			struct ksignal ksig;
