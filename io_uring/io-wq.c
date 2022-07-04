@@ -817,6 +817,8 @@ int io_uringlet_offload(struct io_wq *wq)
 static void io_init_new_worker(struct io_wqe *wqe, struct io_worker *worker,
 			       struct task_struct *tsk)
 {
+	struct io_wq *wq = wqe->wq;
+
 	tsk->worker_private = worker;
 	worker->task = tsk;
 	set_cpus_allowed_ptr(tsk, wqe->cpu_mask);
@@ -827,6 +829,11 @@ static void io_init_new_worker(struct io_wqe *wqe, struct io_worker *worker,
 	list_add_tail_rcu(&worker->all_list, &wqe->all_list);
 	worker->flags |= IO_WORKER_F_FREE;
 	raw_spin_unlock(&wqe->lock);
+
+	if (io_wq_is_let(wq)) {
+		// should return sucess or fail
+		io_uring_alloc_task_context(tsk, wq->ctx);
+	}
 	wake_up_new_task(tsk);
 }
 

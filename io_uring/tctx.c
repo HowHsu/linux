@@ -74,12 +74,14 @@ __cold int io_uring_alloc_task_context(struct task_struct *task,
 		return ret;
 	}
 
-	tctx->io_wq = io_init_wq_offload(ctx, task);
-	if (IS_ERR(tctx->io_wq)) {
-		ret = PTR_ERR(tctx->io_wq);
-		percpu_counter_destroy(&tctx->inflight);
-		kfree(tctx);
-		return ret;
+	if (!(ctx->flags & IORING_SETUP_URINGLET)) {
+		tctx->io_wq = io_init_wq_offload(ctx, task);
+		if (IS_ERR(tctx->io_wq)) {
+			ret = PTR_ERR(tctx->io_wq);
+			percpu_counter_destroy(&tctx->inflight);
+			kfree(tctx);
+			return ret;
+		}
 	}
 
 	xa_init(&tctx->xa);
