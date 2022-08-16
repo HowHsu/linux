@@ -2922,6 +2922,12 @@ void __io_uring_cancel(bool cancel_all)
 	io_uring_cancel_generic(cancel_all, NULL);
 }
 
+struct io_wq_work *io_uringlet_cancel(struct io_wq_work *work)
+{
+	__io_uring_cancel(true);
+	return NULL;
+}
+
 static void *io_uring_validate_mmap_request(struct file *file,
 					    loff_t pgoff, size_t sz)
 {

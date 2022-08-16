@@ -41,9 +41,11 @@ struct io_wq *io_init_wq_offload(struct io_ring_ctx *ctx,
 	if (ctx->flags & IORING_SETUP_URINGLET) {
 		data.private = ctx;
 		data.do_work = io_submit_sqes_let;
+		data.free_work = io_uringlet_cancel;
 	} else {
 		data.private = NULL;
 		data.do_work = io_wq_submit_work;
+		data.free_work = io_wq_free_work;
 	}
 
 	/* Do QD, or 4 * CPUS, whatever is smallest */

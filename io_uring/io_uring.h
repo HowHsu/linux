@@ -71,6 +71,7 @@ int io_req_prep_async(struct io_kiocb *req);
 void io_uringlet_end(struct io_ring_ctx *ctx);
 
 struct io_wq_work *io_wq_free_work(struct io_wq_work *work);
+struct io_wq_work *io_uringlet_cancel(struct io_wq_work *work);
 int io_wq_submit_work(struct io_wq_work *work);
 
 void io_free_req(struct io_kiocb *req);
