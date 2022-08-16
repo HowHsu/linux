@@ -33,6 +33,7 @@ enum {
 	IO_WORKER_F_FREE	= 4,	/* worker on free list */
 	IO_WORKER_F_BOUND	= 8,	/* is doing bounded work */
 	IO_WORKER_F_SCHEDULED	= 16,	/* worker had been scheduled out before */
+	IO_WORKER_F_SUBMIT	= 32,	/* uringlet worker is submitting sqes */
 };
 
 typedef struct io_wq_work *(free_work_fn)(struct io_wq_work *);

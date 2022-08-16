@@ -393,6 +393,21 @@ static inline bool io_wq_is_uringlet(struct io_wq *wq)
 	return wq->private;
 }
 
+static inline void io_worker_set_submit(struct io_worker *worker)
+{
+	worker->flags |= IO_WORKER_F_SUBMIT;
+}
+
+static inline void io_worker_clean_submit(struct io_worker *worker)
+{
+	worker->flags &= ~IO_WORKER_F_SUBMIT;
+}
+
+static inline bool io_worker_test_submit(struct io_worker *worker)
+{
+	return worker->flags & IO_WORKER_F_SUBMIT;
+}
+
 static void io_wqe_dec_running(struct io_worker *worker)
 {
 	struct io_wqe_acct *acct = io_wqe_get_acct(worker);
@@ -407,6 +422,9 @@ static void io_wqe_dec_running(struct io_worker *worker)
 
 	if (io_wq_is_uringlet(wq)) {
 		bool activated;
+
+		if (!io_worker_test_submit(worker))
+			return;
 
 		raw_spin_lock(&wqe->lock);
 		rcu_read_lock();
@@ -688,7 +706,9 @@ static void io_wqe_worker_let(struct io_worker *worker)
 		do {
 			enum io_uringlet_state submit_state;
 
+			io_worker_set_submit(worker);
 			submit_state = wq->do_work(wq->private);
+			io_worker_clean_submit(worker);
 			if (submit_state == IO_URINGLET_SCHEDULED) {
 				empty_count = 0;
 				break;
