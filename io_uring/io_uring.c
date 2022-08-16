@@ -1582,7 +1582,14 @@ static int io_issue_sqe(struct io_kiocb *req, unsigned int issue_flags)
 		revert_creds(creds);
 
 	if (ret == IOU_OK) {
-		if (issue_flags & IO_URING_F_COMPLETE_DEFER)
+		bool uringlet = req->ctx->flags & IORING_SETUP_URINGLET;
+		bool scheduled = false;
+
+		if (uringlet)
+			scheduled =
+				io_worker_test_scheduled(current->worker_private);
+
+		if ((issue_flags & IO_URING_F_COMPLETE_DEFER) && !scheduled)
 			io_req_complete_defer(req);
 		else
 			io_req_complete_post(req);
