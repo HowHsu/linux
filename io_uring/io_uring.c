@@ -1751,8 +1751,12 @@ static inline void io_queue_sqe(struct io_kiocb *req)
 	__must_hold(&req->ctx->uring_lock)
 {
 	int ret;
+	unsigned int issue_flags = IO_URING_F_COMPLETE_DEFER;
 
-	ret = io_issue_sqe(req, IO_URING_F_NONBLOCK|IO_URING_F_COMPLETE_DEFER);
+	if (!(req->ctx->flags & IORING_SETUP_URINGLET))
+		issue_flags |= IO_URING_F_NONBLOCK;
+
+	ret = io_issue_sqe(req, issue_flags);
 
 	/*
 	 * We async punt it if the file wasn't marked NOWAIT, or if the file
