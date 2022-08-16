@@ -399,6 +399,7 @@ static void io_wqe_dec_running(struct io_worker *worker)
 		if (!io_worker_test_submit(worker))
 			return;
 
+		io_uringlet_end(wq->private);
 		io_worker_set_scheduled(worker);
 		raw_spin_lock(&wqe->lock);
 		rcu_read_lock();

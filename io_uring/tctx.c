@@ -37,12 +37,14 @@ struct io_wq *io_init_wq_offload(struct io_ring_ctx *ctx,
 	/* for uringlet, wq->task is the iouring instance creator */
 	data.task = task;
 	data.free_work = io_wq_free_work;
-	data.do_work = io_wq_submit_work;
 	/* distinguish normal iowq and uringlet by wq->private for now */
-	if (ctx->flags & IORING_SETUP_URINGLET)
+	if (ctx->flags & IORING_SETUP_URINGLET) {
 		data.private = ctx;
-	else
+		data.do_work = io_submit_sqes_let;
+	} else {
 		data.private = NULL;
+		data.do_work = io_wq_submit_work;
+	}
 
 	/* Do QD, or 4 * CPUS, whatever is smallest */
 	concurrency = min(ctx->sq_entries, 4 * num_online_cpus());
