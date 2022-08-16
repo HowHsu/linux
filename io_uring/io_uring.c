@@ -1612,7 +1612,7 @@ struct io_wq_work *io_wq_free_work(struct io_wq_work *work)
 	return req ? &req->work : NULL;
 }
 
-void io_wq_submit_work(struct io_wq_work *work)
+int io_wq_submit_work(struct io_wq_work *work)
 {
 	struct io_kiocb *req = container_of(work, struct io_kiocb, work);
 	const struct io_op_def *def = &io_op_defs[req->opcode];
@@ -1632,7 +1632,7 @@ void io_wq_submit_work(struct io_wq_work *work)
 	if (work->flags & IO_WQ_WORK_CANCEL) {
 fail:
 		io_req_task_queue_fail(req, err);
-		return;
+		return 0;
 	}
 	if (!io_assign_file(req, issue_flags)) {
 		err = -EBADF;
@@ -1666,7 +1666,7 @@ fail:
 		}
 
 		if (io_arm_poll_handler(req, issue_flags) == IO_APOLL_OK)
-			return;
+			return 0;
 		/* aborted or ready, in either case retry blocking */
 		needs_poll = false;
 		issue_flags &= ~IO_URING_F_NONBLOCK;
@@ -1675,6 +1675,8 @@ fail:
 	/* avoid locking problems by failing it from a clean context */
 	if (ret < 0)
 		io_req_task_queue_fail(req, ret);
+
+	return 0;
 }
 
 inline struct file *io_file_get_fixed(struct io_kiocb *req, int fd,

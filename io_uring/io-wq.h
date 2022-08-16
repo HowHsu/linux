@@ -21,8 +21,14 @@ enum io_wq_cancel {
 	IO_WQ_CANCEL_NOTFOUND,	/* work not found */
 };
 
+enum io_uringlet_state {
+	IO_URINGLET_INLINE,
+	IO_URINGLET_EMPTY,
+	IO_URINGLET_SCHEDULED,
+};
+
 typedef struct io_wq_work *(free_work_fn)(struct io_wq_work *);
-typedef void (io_wq_work_fn)(struct io_wq_work *);
+typedef int (io_wq_work_fn)(struct io_wq_work *);
 
 struct io_wq_hash {
 	refcount_t refs;

@@ -20,6 +20,7 @@
 #include "io-wq.h"
 #include "slist.h"
 #include "io_uring.h"
+#include "tctx.h"
 
 #define WORKER_IDLE_TIMEOUT	(5 * HZ)
 
@@ -617,19 +618,12 @@ static void io_worker_handle_work(struct io_worker *worker)
 	} while (1);
 }
 
-static int io_wqe_worker(void *data)
+static void io_wqe_worker_normal(struct io_worker *worker)
 {
-	struct io_worker *worker = data;
 	struct io_wqe_acct *acct = io_wqe_get_acct(worker);
 	struct io_wqe *wqe = worker->wqe;
 	struct io_wq *wq = wqe->wq;
 	bool last_timeout = false;
-	char buf[TASK_COMM_LEN];
-
-	worker->flags |= (IO_WORKER_F_UP | IO_WORKER_F_RUNNING);
-
-	snprintf(buf, sizeof(buf), "iou-wrk-%d", wq->task->pid);
-	set_task_comm(current, buf);
 
 	while (!test_bit(IO_WQ_BIT_EXIT, &wq->state)) {
 		long ret;
@@ -664,6 +658,78 @@ static int io_wqe_worker(void *data)
 
 	if (test_bit(IO_WQ_BIT_EXIT, &wq->state))
 		io_worker_handle_work(worker);
+}
+
+#define IO_URINGLET_EMPTY_LIMIT	100000
+#define URINGLET_WORKER_IDLE_TIMEOUT	1
+
+static void io_wqe_worker_let(struct io_worker *worker)
+{
+	struct io_wqe *wqe = worker->wqe;
+	struct io_wq *wq = wqe->wq;
+
+	/* TODO this one breaks encapsulation */
+	if (unlikely(io_uring_add_tctx_node(wq->private)))
+		goto out;
+
+	while (!test_bit(IO_WQ_BIT_EXIT, &wq->state)) {
+		unsigned int empty_count = 0;
+
+		__io_worker_busy(wqe, worker);
+		set_current_state(TASK_INTERRUPTIBLE);
+
+		do {
+			enum io_uringlet_state submit_state;
+
+			submit_state = wq->do_work(wq->private);
+			if (submit_state == IO_URINGLET_SCHEDULED) {
+				empty_count = 0;
+				break;
+			} else if (submit_state == IO_URINGLET_EMPTY) {
+				if (++empty_count > IO_URINGLET_EMPTY_LIMIT)
+					break;
+			} else {
+				empty_count = 0;
+			}
+			cond_resched();
+		} while (1);
+
+		raw_spin_lock(&wqe->lock);
+		__io_worker_idle(wqe, worker);
+		raw_spin_unlock(&wqe->lock);
+		schedule_timeout(URINGLET_WORKER_IDLE_TIMEOUT);
+		if (signal_pending(current)) {
+			struct ksignal ksig;
+
+			if (!get_signal(&ksig))
+				continue;
+			break;
+		}
+	}
+
+	__set_current_state(TASK_RUNNING);
+out:
+	wq->free_work(NULL);
+}
+
+static int io_wqe_worker(void *data)
+{
+	struct io_worker *worker = data;
+	struct io_wqe *wqe = worker->wqe;
+	struct io_wq *wq = wqe->wq;
+	bool uringlet = io_wq_is_uringlet(wq);
+	char buf[TASK_COMM_LEN];
+
+	worker->flags |= (IO_WORKER_F_UP | IO_WORKER_F_RUNNING);
+
+	snprintf(buf, sizeof(buf), uringlet ? "iou-let-%d" : "iou-wrk-%d",
+		 wq->task->pid);
+	set_task_comm(current, buf);
+
+	if (uringlet)
+		io_wqe_worker_let(worker);
+	else
+		io_wqe_worker_normal(worker);
 
 	io_worker_exit(worker);
 	return 0;
