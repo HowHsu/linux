@@ -27,6 +27,14 @@ enum io_uringlet_state {
 	IO_URINGLET_SCHEDULED,
 };
 
+enum {
+	IO_WORKER_F_UP		= 1,	/* up and active */
+	IO_WORKER_F_RUNNING	= 2,	/* account as running */
+	IO_WORKER_F_FREE	= 4,	/* worker on free list */
+	IO_WORKER_F_BOUND	= 8,	/* is doing bounded work */
+	IO_WORKER_F_SCHEDULED	= 16,	/* worker had been scheduled out before */
+};
+
 typedef struct io_wq_work *(free_work_fn)(struct io_wq_work *);
 typedef int (io_wq_work_fn)(struct io_wq_work *);
 
