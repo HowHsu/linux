@@ -404,14 +404,28 @@ static void io_wqe_dec_running(struct io_worker *worker)
 {
 	struct io_wqe_acct *acct = io_wqe_get_acct(worker);
 	struct io_wqe *wqe = worker->wqe;
+	struct io_wq *wq = wqe->wq;
+	bool zero_refs;
 
 	if (!(worker->flags & IO_WORKER_F_UP))
 		return;
 
-	if (!atomic_dec_and_test(&acct->nr_running))
-		return;
-	if (!io_acct_run_queue(acct))
-		return;
+	zero_refs = atomic_dec_and_test(&acct->nr_running);
+
+	if (io_wq_is_uringlet(wq)) {
+		bool activated;
+
+		raw_spin_lock(&wqe->lock);
+		rcu_read_lock();
+		activated = io_wqe_activate_free_worker(wqe, acct);
+		rcu_read_unlock();
+		raw_spin_unlock(&wqe->lock);
+		if (activated)
+			return;
+	} else {
+		if (!zero_refs || !io_acct_run_queue(acct))
+			return;
+	}
 
 	atomic_inc(&acct->nr_running);
 	atomic_inc(&wqe->wq->worker_refs);
