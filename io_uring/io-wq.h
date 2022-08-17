@@ -3,8 +3,36 @@
 
 #include <linux/refcount.h>
 #include <linux/io_uring_types.h>
+#include <linux/list_nulls.h>
 
 struct io_wq;
+
+/*
+ * One for each thread in a wqe pool
+ */
+struct io_worker {
+	refcount_t ref;
+	unsigned flags;
+	struct hlist_nulls_node nulls_node;
+	struct list_head all_list;
+	struct task_struct *task;
+	struct io_wqe *wqe;
+
+	struct io_wq_work *cur_work;
+	struct io_wq_work *next_work;
+	raw_spinlock_t lock;
+
+	struct completion ref_done;
+
+	unsigned long create_state;
+	struct callback_head create_work;
+	int create_index;
+
+	union {
+		struct rcu_head rcu;
+		struct work_struct work;
+	};
+};
 
 enum {
 	IO_WQ_WORK_CANCEL	= 1,
@@ -95,6 +123,21 @@ static inline bool io_wq_current_is_worker(void)
 {
 	return in_task() && (current->flags & PF_IO_WORKER) &&
 		current->worker_private;
+}
+
+static inline void io_worker_set_scheduled(struct io_worker *worker)
+{
+	worker->flags |= IO_WORKER_F_SCHEDULED;
+}
+
+static inline void io_worker_clean_scheduled(struct io_worker *worker)
+{
+	worker->flags &= ~IO_WORKER_F_SCHEDULED;
+}
+
+static inline bool io_worker_test_scheduled(struct io_worker *worker)
+{
+	return worker->flags & IO_WORKER_F_SCHEDULED;
 }
 
 extern struct io_wq *io_init_wq_offload(struct io_ring_ctx *ctx,

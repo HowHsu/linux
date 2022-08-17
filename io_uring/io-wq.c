@@ -32,33 +32,6 @@ enum {
 	IO_ACCT_STALLED_BIT	= 0,	/* stalled on hash */
 };
 
-/*
- * One for each thread in a wqe pool
- */
-struct io_worker {
-	refcount_t ref;
-	unsigned flags;
-	struct hlist_nulls_node nulls_node;
-	struct list_head all_list;
-	struct task_struct *task;
-	struct io_wqe *wqe;
-
-	struct io_wq_work *cur_work;
-	struct io_wq_work *next_work;
-	raw_spinlock_t lock;
-
-	struct completion ref_done;
-
-	unsigned long create_state;
-	struct callback_head create_work;
-	int create_index;
-
-	union {
-		struct rcu_head rcu;
-		struct work_struct work;
-	};
-};
-
 #if BITS_PER_LONG == 64
 #define IO_WQ_HASH_ORDER	6
 #else
@@ -426,6 +399,7 @@ static void io_wqe_dec_running(struct io_worker *worker)
 		if (!io_worker_test_submit(worker))
 			return;
 
+		io_worker_set_scheduled(worker);
 		raw_spin_lock(&wqe->lock);
 		rcu_read_lock();
 		activated = io_wqe_activate_free_worker(wqe, acct);
@@ -706,6 +680,7 @@ static void io_wqe_worker_let(struct io_worker *worker)
 		do {
 			enum io_uringlet_state submit_state;
 
+			io_worker_clean_scheduled(worker);
 			io_worker_set_submit(worker);
 			submit_state = wq->do_work(wq->private);
 			io_worker_clean_submit(worker);
