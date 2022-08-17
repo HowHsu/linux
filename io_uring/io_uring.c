@@ -2699,6 +2699,11 @@ static __cold void io_ring_ctx_wait_and_kill(struct io_ring_ctx *ctx)
 	unsigned long index;
 	struct creds *creds;
 
+	if (ctx->flags & IORING_SETUP_URINGLET) {
+		io_wq_exit_start(ctx->let);
+		io_wq_put_and_exit(ctx->let);
+	}
+
 	mutex_lock(&ctx->uring_lock);
 	percpu_ref_kill(&ctx->refs);
 	if (ctx->rings)
