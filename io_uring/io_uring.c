@@ -2171,6 +2171,7 @@ int io_submit_sqes_let(struct io_wq_work *work)
 
 	io_get_task_refs(entries);
 	io_submit_state_start(&ctx->submit_state, entries);
+	ctx->submit_state->need_plug = false;
 	do {
 		const struct io_uring_sqe *sqe;
 		struct io_kiocb *req;
