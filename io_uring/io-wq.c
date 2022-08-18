@@ -404,8 +404,12 @@ static void io_wqe_dec_running(struct io_worker *worker)
 		if (!io_worker_test_submit(worker))
 			return;
 
-		io_uringlet_end(wq->private);
+		if (io_worker_test_scheduled(worker))
+			return;
+
 		io_worker_set_scheduled(worker);
+
+		io_uringlet_end(wq->private);
 		raw_spin_lock(&wq->lock);
 		wq->owner = IO_WQ_OWNER_TRANSMIT;
 		raw_spin_unlock(&wq->lock);
