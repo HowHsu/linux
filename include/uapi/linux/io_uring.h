@@ -378,6 +378,7 @@ struct io_sqring_offsets {
 #define IORING_SQ_NEED_WAKEUP	(1U << 0) /* needs io_uring_enter wakeup */
 #define IORING_SQ_CQ_OVERFLOW	(1U << 1) /* CQ ring is overflown */
 #define IORING_SQ_TASKRUN	(1U << 2) /* task should enter the kernel */
+#define IORING_LET_NEED_WAKEUP	(1U << 3)
 
 struct io_cqring_offsets {
 	__u32 head;

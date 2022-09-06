@@ -2208,6 +2208,15 @@ int io_submit_sqes_let(struct io_wq_work *work)
 	return IO_URINGLET_INLINE;
 }
 
+void set_uringlet_wakeup_flags(struct io_ring_ctx *ctx)
+{
+	atomic_or(IORING_LET_NEED_WAKEUP, &ctx->rings->let_flags);
+}
+
+void clear_uringlet_wakeup_flags(struct io_ring_ctx *ctx)
+{
+	atomic_andnot(IORING_LET_NEED_WAKEUP, &ctx->rings->let_flags);
+}
 
 struct io_wait_queue {
 	struct wait_queue_entry wq;

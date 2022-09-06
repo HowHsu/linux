@@ -79,6 +79,8 @@ void io_queue_next(struct io_kiocb *req);
 void __io_put_task(struct task_struct *task, int nr);
 void io_task_refs_refill(struct io_uring_task *tctx);
 bool __io_alloc_req_refill(struct io_ring_ctx *ctx);
+void set_uringlet_wakeup_flags(struct io_ring_ctx *ctx);
+void clear_uringlet_wakeup_flags(struct io_ring_ctx *ctx);
 
 bool io_match_task_safe(struct io_kiocb *head, struct task_struct *task,
 			bool cancel_all);

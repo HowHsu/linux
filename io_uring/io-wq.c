@@ -686,9 +686,9 @@ static void io_wqe_worker_let(struct io_worker *worker)
 		goto out;
 
 	while (!test_bit(IO_WQ_BIT_EXIT, &wq->state)) {
-		unsigned int empty_count = 0;
 		struct io_worker *owner;
 
+start:
 		raw_spin_lock(&wq->lock);
 		owner = wq->owner;
 		if (owner && owner != IO_WQ_OWNER_TRANSMIT && owner != worker) {
@@ -710,22 +710,24 @@ static void io_wqe_worker_let(struct io_worker *worker)
 			submit_state = wq->do_work(wq->private);
 			io_worker_clean_submit(worker);
 			if (submit_state == IO_URINGLET_SCHEDULED) {
-				empty_count = 0;
 				break;
 			} else if (submit_state == IO_URINGLET_EMPTY) {
-				if (++empty_count > IO_URINGLET_EMPTY_LIMIT)
-					break;
-			} else {
-				empty_count = 0;
+				set_uringlet_wakeup_flags(wq->private);
+				raw_spin_lock(&wq->lock);
+				wq->owner = NULL;
+				raw_spin_unlock(&wq->lock);
+				break;
 			}
-			cond_resched();
 		} while (1);
+
+		if (io_sqring_entries(wq->private))
+			goto start;
 
 sleep:
 		raw_spin_lock(&wqe->lock);
 		__io_worker_idle(wqe, worker);
 		raw_spin_unlock(&wqe->lock);
-		schedule_timeout(URINGLET_WORKER_IDLE_TIMEOUT);
+		schedule();
 		if (signal_pending(current)) {
 			struct ksignal ksig;
 
@@ -805,6 +807,7 @@ int io_uringlet_offload(struct io_wq *wq)
 	struct io_wqe_acct *acct = io_get_acct(wqe, true);
 	bool waken;
 
+	clear_uringlet_wakeup_flags(wq->private);
 	raw_spin_lock(&wq->lock);
 	if (wq->owner) {
 		raw_spin_unlock(&wq->lock);
@@ -812,6 +815,7 @@ int io_uringlet_offload(struct io_wq *wq)
 	}
 	wq->owner = IO_WQ_OWNER_TRANSMIT;
 	raw_spin_unlock(&wq->lock);
+
 
 	raw_spin_lock(&wqe->lock);
 	rcu_read_lock();

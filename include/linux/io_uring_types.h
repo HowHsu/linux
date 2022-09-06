@@ -122,7 +122,10 @@ struct io_rings {
 	 * The application needs a full memory barrier before checking
 	 * for IORING_SQ_NEED_WAKEUP after updating the sq tail.
 	 */
-	atomic_t		sq_flags;
+	union {
+		atomic_t		sq_flags;
+		atomic_t		let_flags;
+	};
 	/*
 	 * Runtime CQ flags
 	 *
