@@ -442,9 +442,9 @@ int io_timeout_remove(struct io_kiocb *req, unsigned int issue_flags)
 	if (!(tr->flags & IORING_TIMEOUT_UPDATE)) {
 		struct io_cancel_data cd = { .data = tr->addr, };
 
-		spin_lock(&ctx->completion_lock);
+		raw_spin_lock(&ctx->completion_lock);
 		ret = io_timeout_cancel(ctx, &cd);
-		spin_unlock(&ctx->completion_lock);
+		raw_spin_unlock(&ctx->completion_lock);
 	} else {
 		enum hrtimer_mode mode = io_translate_timeout_mode(tr->flags);
 

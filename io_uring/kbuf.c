@@ -96,9 +96,9 @@ unsigned int __io_put_kbuf(struct io_kiocb *req, unsigned issue_flags)
 	} else if (issue_flags & IO_URING_F_UNLOCKED) {
 		struct io_ring_ctx *ctx = req->ctx;
 
-		spin_lock(&ctx->completion_lock);
+		raw_spin_lock(&ctx->completion_lock);
 		cflags = __io_put_kbuf_list(req, &ctx->io_buffers_comp);
-		spin_unlock(&ctx->completion_lock);
+		raw_spin_unlock(&ctx->completion_lock);
 	} else {
 		lockdep_assert_held(&req->ctx->uring_lock);
 
@@ -362,14 +362,14 @@ static int io_refill_buffer_cache(struct io_ring_ctx *ctx)
 	 * the completion list and splice those entries first.
 	 */
 	if (!list_empty_careful(&ctx->io_buffers_comp)) {
-		spin_lock(&ctx->completion_lock);
+		raw_spin_lock(&ctx->completion_lock);
 		if (!list_empty(&ctx->io_buffers_comp)) {
 			list_splice_init(&ctx->io_buffers_comp,
 						&ctx->io_buffers_cache);
-			spin_unlock(&ctx->completion_lock);
+			raw_spin_unlock(&ctx->completion_lock);
 			return 0;
 		}
-		spin_unlock(&ctx->completion_lock);
+		raw_spin_unlock(&ctx->completion_lock);
 	}
 
 	/*

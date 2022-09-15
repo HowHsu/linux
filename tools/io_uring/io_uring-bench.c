@@ -28,6 +28,7 @@
 #include <string.h>
 #include <pthread.h>
 #include <sched.h>
+#include <stdatomic.h>
 
 #include "liburing.h"
 #include "barrier.h"
@@ -53,8 +54,8 @@ struct io_cq_ring {
 
 #define DEPTH			128
 
-#define BATCH_SUBMIT		32
-#define BATCH_COMPLETE		32
+#define BATCH_SUBMIT		1
+#define BATCH_COMPLETE		1
 
 #define BS			4096
 
@@ -96,10 +97,10 @@ static volatile int finish;
 /*
  * OPTIONS: Set these to test the various features of io_uring.
  */
-static int polled = 1;		/* use IO polling */
-static int fixedbufs = 1;	/* use fixed user buffers */
-static int register_files = 1;	/* use fixed files */
-static int buffered = 0;	/* use buffered IO, not O_DIRECT */
+static int polled = 0;		/* use IO polling */
+static int fixedbufs = 0;	/* use fixed user buffers */
+static int register_files = 0;	/* use fixed files */
+static int buffered = 1;	/* use buffered IO, not O_DIRECT */
 static int sq_thread_poll = 0;	/* use kernel submission/poller thread */
 static int sq_thread_cpu = -1;	/* pin above thread to this CPU */
 static int do_nop = 0;		/* no-op SQ ring commands */
@@ -181,11 +182,13 @@ static void init_io(struct submitter *s, unsigned index)
 		sqe->len = BS;
 		sqe->buf_index = index;
 	} else {
-		sqe->opcode = IORING_OP_READV;
+//		sqe->opcode = IORING_OP_READV;
+		sqe->opcode = IORING_OP_WRITEV;
 		sqe->addr = (unsigned long) &s->iovecs[index];
 		sqe->len = 1;
 		sqe->buf_index = 0;
 	}
+//	printf("sqe->flags: %d\n", sqe->flags);
 	sqe->ioprio = 0;
 	sqe->off = offset;
 	sqe->user_data = (unsigned long) f;
@@ -274,12 +277,16 @@ static int reap_events(struct submitter *s)
 	write_barrier();
 	return reaped;
 }
+#define IO_URING_READ_ONCE(var)					\
+	atomic_load_explicit((_Atomic __typeof__(var) *)&(var),	\
+			     memory_order_relaxed)
 
 static void *submitter_fn(void *data)
 {
 	struct submitter *s = data;
 	struct io_sq_ring *ring = &s->sq_ring;
 	int ret, prepped;
+	int cnt = 0;
 
 	printf("submitter=%d\n", lk_gettid());
 
@@ -300,7 +307,8 @@ submit:
 		if (to_submit && (s->inflight + to_submit <= DEPTH))
 			to_wait = 0;
 		else
-			to_wait = min(s->inflight + to_submit, BATCH_COMPLETE);
+		//	to_wait = min(s->inflight + to_submit, BATCH_COMPLETE);
+			to_wait = min(s->inflight + to_submit, 0);
 
 		/*
 		 * Only need to call io_uring_enter if we're not using SQ thread
@@ -309,12 +317,15 @@ submit:
 		if (!sq_thread_poll || (*ring->flags & IORING_SQ_NEED_WAKEUP)) {
 			unsigned flags = 0;
 
-			if (to_wait)
-				flags = IORING_ENTER_GETEVENTS;
-			if ((*ring->flags & IORING_SQ_NEED_WAKEUP))
-				flags |= IORING_ENTER_SQ_WAKEUP;
-			ret = io_uring_enter(s->ring_fd, to_submit, to_wait,
-						flags, NULL);
+			cnt++;
+			read_barrier();
+			if ((*ring->flags) & (1 << 3)) {
+		//		printf("%d: has wakeup flag: %d\n", cnt, *ring->flags);
+				ret = io_uring_enter(s->ring_fd, to_submit,
+						     0, flags, NULL);
+		//	} else {
+		//		printf("%d: no wakeup flag: %d\n", cnt, *ring->flags);
+			}
 			s->calls++;
 		}
 
@@ -332,7 +343,8 @@ submit:
 				break;
 			} else if (r > 0)
 				this_reap += r;
-		} while (sq_thread_poll && this_reap < to_wait);
+			usleep(1);
+		} while (this_reap < to_submit);
 		s->reaps += this_reap;
 
 		if (ret >= 0) {
@@ -406,6 +418,8 @@ static int setup_ring(struct submitter *s)
 		}
 	}
 
+	// Hao Xu
+	p.flags |= (1 << 13);
 	fd = io_uring_setup(DEPTH, &p);
 	if (fd < 0) {
 		perror("io_uring_setup");
@@ -490,7 +504,8 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	flags = O_RDONLY | O_NOATIME;
+	flags = O_RDWR;
+//	flags = O_RDONLY | O_NOATIME;
 	if (!buffered)
 		flags |= O_DIRECT;
 
@@ -503,6 +518,7 @@ int main(int argc, char *argv[])
 			break;
 		}
 		fd = open(argv[i], flags);
+		printf("file: %s, fd: %d\n", argv[i], fd);
 		if (fd < 0) {
 			perror("open");
 			return 1;
@@ -540,11 +556,12 @@ int main(int argc, char *argv[])
 
 	for (i = 0; i < DEPTH; i++) {
 		void *buf;
-
+	
 		if (posix_memalign(&buf, BS, BS)) {
 			printf("failed alloc\n");
 			return 1;
 		}
+		memset(buf, -1, BS);
 		s->iovecs[i].iov_base = buf;
 		s->iovecs[i].iov_len = BS;
 	}

@@ -304,7 +304,7 @@ static __cold struct io_ring_ctx *io_ring_ctx_alloc(struct io_uring_params *p)
 	xa_init_flags(&ctx->personalities, XA_FLAGS_ALLOC1);
 	mutex_init(&ctx->uring_lock);
 	init_waitqueue_head(&ctx->cq_wait);
-	spin_lock_init(&ctx->completion_lock);
+	raw_spin_lock_init(&ctx->completion_lock);
 	spin_lock_init(&ctx->timeout_lock);
 	INIT_WQ_LIST(&ctx->iopoll_list);
 	INIT_LIST_HEAD(&ctx->io_buffers_pages);
@@ -482,7 +482,7 @@ static void io_eventfd_signal(struct io_ring_ctx *ctx)
 	struct io_ev_fd *ev_fd;
 	bool skip;
 
-	spin_lock(&ctx->completion_lock);
+	raw_spin_lock(&ctx->completion_lock);
 	/*
 	 * Eventfd should only get triggered when at least one event has been
 	 * posted. Some applications rely on the eventfd notification count only
@@ -493,7 +493,7 @@ static void io_eventfd_signal(struct io_ring_ctx *ctx)
 	 */
 	skip = ctx->cached_cq_tail == ctx->evfd_last_cq_tail;
 	ctx->evfd_last_cq_tail = ctx->cached_cq_tail;
-	spin_unlock(&ctx->completion_lock);
+	raw_spin_unlock(&ctx->completion_lock);
 	if (skip)
 		return;
 
@@ -523,12 +523,12 @@ out:
 void __io_commit_cqring_flush(struct io_ring_ctx *ctx)
 {
 	if (ctx->off_timeout_used || ctx->drain_active) {
-		spin_lock(&ctx->completion_lock);
+		raw_spin_lock(&ctx->completion_lock);
 		if (ctx->off_timeout_used)
 			io_flush_timeouts(ctx);
 		if (ctx->drain_active)
 			io_queue_deferred(ctx);
-		spin_unlock(&ctx->completion_lock);
+		raw_spin_unlock(&ctx->completion_lock);
 	}
 	if (ctx->has_evfd)
 		io_eventfd_signal(ctx);
@@ -544,7 +544,7 @@ static inline void __io_cq_unlock_post(struct io_ring_ctx *ctx)
 	__releases(ctx->completion_lock)
 {
 	io_commit_cqring(ctx);
-	spin_unlock(&ctx->completion_lock);
+	raw_spin_unlock(&ctx->completion_lock);
 	io_cqring_ev_posted(ctx);
 }
 
@@ -844,10 +844,10 @@ static void io_preinit_req(struct io_kiocb *req, struct io_ring_ctx *ctx)
 static void io_flush_cached_locked_reqs(struct io_ring_ctx *ctx,
 					struct io_submit_state *state)
 {
-	spin_lock(&ctx->completion_lock);
+	raw_spin_lock(&ctx->completion_lock);
 	wq_list_splice(&ctx->locked_free_list, &state->free_list);
 	ctx->locked_free_nr = 0;
-	spin_unlock(&ctx->completion_lock);
+	raw_spin_unlock(&ctx->completion_lock);
 }
 
 /*
@@ -915,10 +915,10 @@ __cold void io_free_req(struct io_kiocb *req)
 	io_dismantle_req(req);
 	io_put_task(req->task, 1);
 
-	spin_lock(&ctx->completion_lock);
+	raw_spin_lock(&ctx->completion_lock);
 	wq_list_add_head(&req->comp_list, &ctx->locked_free_list);
 	ctx->locked_free_nr++;
-	spin_unlock(&ctx->completion_lock);
+	raw_spin_unlock(&ctx->completion_lock);
 }
 
 static void __io_req_find_next_prep(struct io_kiocb *req)
@@ -1183,7 +1183,7 @@ static void __io_submit_flush_completions(struct io_ring_ctx *ctx)
 	struct io_wq_work_node *node, *prev;
 	struct io_submit_state *state = &ctx->submit_state;
 
-	spin_lock(&ctx->completion_lock);
+	raw_spin_lock(&ctx->completion_lock);
 	wq_list_for_each(node, prev, &state->compl_reqs) {
 		struct io_kiocb *req = container_of(node, struct io_kiocb,
 					    comp_list);
@@ -1475,15 +1475,15 @@ static __cold void io_drain_req(struct io_kiocb *req)
 	u32 seq = io_get_sequence(req);
 
 	/* Still need defer if there is pending req in defer list. */
-	spin_lock(&ctx->completion_lock);
+	raw_spin_lock(&ctx->completion_lock);
 	if (!req_need_defer(req, seq) && list_empty_careful(&ctx->defer_list)) {
-		spin_unlock(&ctx->completion_lock);
+		raw_spin_unlock(&ctx->completion_lock);
 queue:
 		ctx->drain_active = false;
 		io_req_task_queue(req);
 		return;
 	}
-	spin_unlock(&ctx->completion_lock);
+	raw_spin_unlock(&ctx->completion_lock);
 
 	ret = io_req_prep_async(req);
 	if (ret) {
@@ -1498,9 +1498,9 @@ fail:
 		goto fail;
 	}
 
-	spin_lock(&ctx->completion_lock);
+	raw_spin_lock(&ctx->completion_lock);
 	if (!req_need_defer(req, seq) && list_empty(&ctx->defer_list)) {
-		spin_unlock(&ctx->completion_lock);
+		raw_spin_unlock(&ctx->completion_lock);
 		kfree(de);
 		goto queue;
 	}
@@ -1509,15 +1509,15 @@ fail:
 	de->req = req;
 	de->seq = seq;
 	list_add_tail(&de->list, &ctx->defer_list);
-	spin_unlock(&ctx->completion_lock);
+	raw_spin_unlock(&ctx->completion_lock);
 }
 
 static void io_clean_op(struct io_kiocb *req)
 {
 	if (req->flags & REQ_F_BUFFER_SELECTED) {
-		spin_lock(&req->ctx->completion_lock);
+		raw_spin_lock(&req->ctx->completion_lock);
 		io_put_kbuf_comp(req);
-		spin_unlock(&req->ctx->completion_lock);
+		raw_spin_unlock(&req->ctx->completion_lock);
 	}
 
 	if (req->flags & REQ_F_NEED_CLEANUP) {
@@ -2175,6 +2175,7 @@ int io_submit_sqes_let(struct io_wq_work *work)
 	do {
 		const struct io_uring_sqe *sqe;
 		struct io_kiocb *req;
+		int ret;
 
 		if (unlikely(!io_alloc_req_refill(ctx)))
 			break;
@@ -2185,7 +2186,10 @@ int io_submit_sqes_let(struct io_wq_work *work)
 			break;
 		}
 
-		if (unlikely(io_submit_sqe(ctx, req, sqe)))
+		io_worker_set_submit(worker);
+		ret = io_submit_sqe(ctx, req, sqe);
+		io_worker_clean_submit(worker);
+		if (unlikely(ret))
 			break;
 		/*  TODO this one breaks encapsulation */
 		scheduled = io_worker_test_scheduled(worker);
@@ -2435,9 +2439,9 @@ static int io_eventfd_register(struct io_ring_ctx *ctx, void __user *arg,
 		return ret;
 	}
 
-	spin_lock(&ctx->completion_lock);
+	raw_spin_lock(&ctx->completion_lock);
 	ctx->evfd_last_cq_tail = ctx->cached_cq_tail;
-	spin_unlock(&ctx->completion_lock);
+	raw_spin_unlock(&ctx->completion_lock);
 
 	ev_fd->eventfd_async = eventfd_async;
 	ctx->has_evfd = true;
@@ -2698,8 +2702,8 @@ static __cold void io_ring_exit_work(struct work_struct *work)
 		mutex_lock(&ctx->uring_lock);
 	}
 	mutex_unlock(&ctx->uring_lock);
-	spin_lock(&ctx->completion_lock);
-	spin_unlock(&ctx->completion_lock);
+	raw_spin_lock(&ctx->completion_lock);
+	raw_spin_unlock(&ctx->completion_lock);
 
 	io_ring_ctx_free(ctx);
 }
@@ -2771,14 +2775,14 @@ static __cold bool io_cancel_defer_files(struct io_ring_ctx *ctx,
 	struct io_defer_entry *de;
 	LIST_HEAD(list);
 
-	spin_lock(&ctx->completion_lock);
+	raw_spin_lock(&ctx->completion_lock);
 	list_for_each_entry_reverse(de, &ctx->defer_list, list) {
 		if (io_match_task_safe(de->req, task, cancel_all)) {
 			list_cut_position(&list, &ctx->defer_list, &de->list);
 			break;
 		}
 	}
-	spin_unlock(&ctx->completion_lock);
+	raw_spin_unlock(&ctx->completion_lock);
 	if (list_empty(&list))
 		return false;
 
@@ -3133,7 +3137,7 @@ SYSCALL_DEFINE6(io_uring_enter, unsigned int, fd, u32, to_submit,
 				goto out;
 		}
 		ret = to_submit;
-	} else if (to_submit) {
+	} else if (to_submit || (ctx->flags & IORING_SETUP_URINGLET)) {
 		ret = io_uring_add_tctx_node(ctx);
 		if (unlikely(ret))
 			goto out;
@@ -3150,8 +3154,10 @@ SYSCALL_DEFINE6(io_uring_enter, unsigned int, fd, u32, to_submit,
 			mutex_unlock(&ctx->uring_lock);
 		} else {
 			ret = io_uringlet_offload(ctx->let);
-			if (ret)
+			if (ret) {
+				BUG();
 				goto out;
+			}
 			ret = to_submit;
 		}
 	}
@@ -3419,6 +3425,7 @@ static __cold int io_uring_create(unsigned entries, struct io_uring_params *p,
 			ret = PTR_ERR(ctx->let);
 			goto err;
 		}
+		set_uringlet_wakeup_flags(ctx);
 	}
 
 	/* always set a rsrc node */

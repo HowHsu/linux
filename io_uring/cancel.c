@@ -98,10 +98,10 @@ int io_try_cancel(struct io_uring_task *tctx, struct io_cancel_data *cd,
 	if (ret != -ENOENT)
 		return ret;
 
-	spin_lock(&ctx->completion_lock);
+	raw_spin_lock(&ctx->completion_lock);
 	if (!(cd->flags & IORING_ASYNC_CANCEL_FD))
 		ret = io_timeout_cancel(ctx, cd);
-	spin_unlock(&ctx->completion_lock);
+	raw_spin_unlock(&ctx->completion_lock);
 	return ret;
 }
 

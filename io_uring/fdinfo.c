@@ -14,6 +14,7 @@
 #include "fdinfo.h"
 #include "cancel.h"
 #include "rsrc.h"
+#include "io-wq.h"
 
 #ifdef CONFIG_PROC_FS
 static __cold int io_uring_show_cred(struct seq_file *m, unsigned int id,
@@ -65,6 +66,15 @@ static __cold void __io_uring_show_fdinfo(struct io_ring_ctx *ctx,
 	bool is_cqe32 = (ctx->flags & IORING_SETUP_CQE32);
 	unsigned int i;
 
+	if (let_owner_is_transmit(ctx->let))
+		seq_printf(m, "let owner:\t transmit\n");
+	else if (let_owner_is_not_null(ctx->let))
+		seq_printf(m, "let owner:\t%d\n", let_get_owner(ctx->let));
+	else
+		seq_printf(m, "let owner:\t NULL\n");
+
+	seq_printf(m, "let wakeup flag:\t%d\n",
+		   atomic_read(&ctx->rings->let_flags));
 	if (is_cqe32)
 		cq_shift = 1;
 
@@ -170,7 +180,7 @@ static __cold void __io_uring_show_fdinfo(struct io_ring_ctx *ctx,
 	}
 
 	seq_puts(m, "CqOverflowList:\n");
-	spin_lock(&ctx->completion_lock);
+	raw_spin_lock(&ctx->completion_lock);
 	list_for_each_entry(ocqe, &ctx->cq_overflow_list, list) {
 		struct io_uring_cqe *cqe = &ocqe->cqe;
 
@@ -179,7 +189,7 @@ static __cold void __io_uring_show_fdinfo(struct io_ring_ctx *ctx,
 
 	}
 
-	spin_unlock(&ctx->completion_lock);
+	raw_spin_unlock(&ctx->completion_lock);
 }
 
 __cold void io_uring_show_fdinfo(struct seq_file *m, struct file *f)

@@ -292,7 +292,7 @@ struct io_ring_ctx {
 	} ____cacheline_aligned_in_smp;
 
 	struct {
-		spinlock_t		completion_lock;
+		raw_spinlock_t		completion_lock;
 
 		/*
 		 * ->iopoll_list is protected by the ctx->uring_lock for

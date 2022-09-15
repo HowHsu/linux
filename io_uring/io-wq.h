@@ -143,4 +143,9 @@ static inline bool io_worker_test_scheduled(struct io_worker *worker)
 extern struct io_wq *io_init_wq_offload(struct io_ring_ctx *ctx,
 					struct task_struct *task);
 extern int io_uringlet_offload(struct io_wq *wq);
+extern int let_get_owner(struct io_wq *wq);
+extern bool let_owner_is_transmit(struct io_wq *let);
+extern bool let_owner_is_not_null(struct io_wq *let);
+extern void io_worker_set_submit(struct io_worker *worker);
+extern void io_worker_clean_submit(struct io_worker *worker);
 #endif

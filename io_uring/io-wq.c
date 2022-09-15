@@ -273,7 +273,7 @@ static int io_wqe_create_worker(struct io_wqe *wqe, struct io_wqe_acct *acct)
 	raw_spin_lock(&wqe->lock);
 	if (acct->nr_workers >= acct->max_workers) {
 		raw_spin_unlock(&wqe->lock);
-		return 0;
+		return 1;
 	}
 	acct->nr_workers++;
 	raw_spin_unlock(&wqe->lock);
@@ -369,12 +369,12 @@ static inline bool io_wq_is_uringlet(struct io_wq *wq)
 	return wq->private;
 }
 
-static inline void io_worker_set_submit(struct io_worker *worker)
+void io_worker_set_submit(struct io_worker *worker)
 {
 	worker->flags |= IO_WORKER_F_SUBMIT;
 }
 
-static inline void io_worker_clean_submit(struct io_worker *worker)
+void io_worker_clean_submit(struct io_worker *worker)
 {
 	worker->flags &= ~IO_WORKER_F_SUBMIT;
 }
@@ -680,6 +680,7 @@ static void io_wqe_worker_let(struct io_worker *worker)
 {
 	struct io_wqe *wqe = worker->wqe;
 	struct io_wq *wq = wqe->wq;
+	int ret = 0;
 
 	/* TODO this one breaks encapsulation */
 	if (unlikely(io_uring_add_tctx_node(wq->private)))
@@ -702,13 +703,13 @@ start:
 		__io_worker_busy(wqe, worker);
 		set_current_state(TASK_INTERRUPTIBLE);
 
+		clear_uringlet_wakeup_flags(wq->private);
 		do {
 			enum io_uringlet_state submit_state;
 
 			io_worker_clean_scheduled(worker);
-			io_worker_set_submit(worker);
+			ret++;
 			submit_state = wq->do_work(wq->private);
-			io_worker_clean_submit(worker);
 			if (submit_state == IO_URINGLET_SCHEDULED) {
 				break;
 			} else if (submit_state == IO_URINGLET_EMPTY) {
@@ -720,13 +721,17 @@ start:
 			}
 		} while (1);
 
-		if (io_sqring_entries(wq->private))
+		smp_mb__after_atomic();
+//		if (io_sqring_entries(wq->private))
+		cond_resched();
+		if (ret % 10000)
 			goto start;
 
 sleep:
 		raw_spin_lock(&wqe->lock);
 		__io_worker_idle(wqe, worker);
 		raw_spin_unlock(&wqe->lock);
+
 		schedule();
 		if (signal_pending(current)) {
 			struct ksignal ksig;
@@ -807,7 +812,6 @@ int io_uringlet_offload(struct io_wq *wq)
 	struct io_wqe_acct *acct = io_get_acct(wqe, true);
 	bool waken;
 
-	clear_uringlet_wakeup_flags(wq->private);
 	raw_spin_lock(&wq->lock);
 	if (wq->owner) {
 		raw_spin_unlock(&wq->lock);
@@ -817,6 +821,7 @@ int io_uringlet_offload(struct io_wq *wq)
 	raw_spin_unlock(&wq->lock);
 
 
+	clear_uringlet_wakeup_flags(wq->private);
 	raw_spin_lock(&wqe->lock);
 	rcu_read_lock();
 	waken = io_wqe_activate_free_worker(wqe, acct);
@@ -1302,7 +1307,7 @@ struct io_wq *io_wq_create(unsigned bounded, struct io_wq_data *data)
 		cpumask_copy(wqe->cpu_mask, cpumask_of_node(node));
 		wq->wqes[node] = wqe;
 		wqe->node = alloc_node;
-		wqe->acct[IO_WQ_ACCT_BOUND].max_workers = bounded;
+		wqe->acct[IO_WQ_ACCT_BOUND].max_workers = 10000 * num_online_cpus();//bounded;
 		wqe->acct[IO_WQ_ACCT_UNBOUND].max_workers =
 					task_rlimit(current, RLIMIT_NPROC);
 		INIT_LIST_HEAD(&wqe->wait.entry);
@@ -1529,6 +1534,19 @@ int io_wq_max_workers(struct io_wq *wq, int *new_count)
 		new_count[i] = prev[i];
 
 	return 0;
+}
+
+int let_get_owner(struct io_wq *let)
+{
+	return let->owner->task->pid;
+}
+bool let_owner_is_transmit(struct io_wq *let)
+{
+	return let->owner == IO_WQ_OWNER_TRANSMIT;
+}
+bool let_owner_is_not_null(struct io_wq *let)
+{
+	return let->owner;
 }
 
 static __init int io_wq_init(void)

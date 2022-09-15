@@ -91,7 +91,7 @@ bool io_match_task_safe(struct io_kiocb *head, struct task_struct *task,
 static inline void io_cq_lock(struct io_ring_ctx *ctx)
 	__acquires(ctx->completion_lock)
 {
-	spin_lock(&ctx->completion_lock);
+	raw_spin_lock(&ctx->completion_lock);
 }
 
 void io_cq_unlock_post(struct io_ring_ctx *ctx);
