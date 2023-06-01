@@ -4351,6 +4351,71 @@ err:
 	return ret;
 }
 
+/*
+ * note: this function sets fixed workers for a single task, so every
+ * task which wants to set the fixed workers has to call this function
+ */
+static __cold int io_register_iowq_fixed_workers(struct io_ring_ctx *ctx,
+					       void __user *arg, int nr_args)
+	__must_hold(&ctx->uring_lock)
+{
+	struct io_uring_task *tctx = NULL;
+	struct io_sq_data *sqd = NULL;
+	struct io_uring_fixed_worker_arg *res;
+	size_t size;
+	int i, ret;
+	bool zero = true;
+
+	size = array_size(nr_args, sizeof(*res));
+	if (size == SIZE_MAX)
+		return -EOVERFLOW;
+
+	res = memdup_user(arg, size);
+	if (IS_ERR(res))
+		return PTR_ERR(res);
+
+	for (i = 0; i < nr_args; i++) {
+		if (res[i].nr_workers) {
+			zero = false;
+			break;
+		}
+	}
+
+	if (zero)
+		return 0;
+
+	if (ctx->flags & IORING_SETUP_SQPOLL) {
+		sqd = ctx->sq_data;
+		if (sqd) {
+			/*
+			 * Observe the correct sqd->lock -> ctx->uring_lock
+			 * ordering. Fine to drop uring_lock here, we hold
+			 * a ref to the ctx.
+			 */
+			refcount_inc(&sqd->refs);
+			mutex_unlock(&ctx->uring_lock);
+			mutex_lock(&sqd->lock);
+			mutex_lock(&ctx->uring_lock);
+			if (sqd->thread)
+				tctx = sqd->thread->io_uring;
+		}
+	} else {
+		tctx = current->io_uring;
+	}
+
+	if (tctx && tctx->io_wq)
+		ret = io_wq_fixed_workers(tctx->io_wq, res);
+	else
+		ret = -EFAULT;
+
+	if (sqd) {
+		mutex_unlock(&sqd->lock);
+		io_put_sq_data(sqd);
+	}
+
+	return ret;
+}
+
 static int __io_uring_register(struct io_ring_ctx *ctx, unsigned opcode,
 			       void __user *arg, unsigned nr_args)
 	__releases(ctx->uring_lock)
@@ -4508,6 +4573,12 @@ static int __io_uring_register(struct io_ring_ctx *ctx, unsigned opcode,
 		if (!arg || nr_args)
 			break;
 		ret = io_register_file_alloc_range(ctx, arg);
+		break;
+	case IORING_REGISTER_IOWQ_FIXED_WORKERS:
+		ret = -EINVAL;
+		if (!arg || nr_args != 2)
+			break;
+		ret = io_register_iowq_fixed_workers(ctx, arg, nr_args);
 		break;
 	default:
 		ret = -EINVAL;

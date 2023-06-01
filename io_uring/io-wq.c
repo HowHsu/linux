@@ -1371,6 +1371,91 @@ int io_wq_max_workers(struct io_wq *wq, int *new_count)
 	return 0;
 }
 
+static void io_wq_clean_fixed_workers(struct io_wq *wq)
+{
+	int i, j;
+
+	for (i = 0; i < IO_WQ_ACCT_NR; i++) {
+		struct io_wq_acct *acct = &wq->acct[i];
+		struct io_worker **workers = acct->fixed_workers;
+
+		if (!workers)
+			continue;
+
+		for (j = 0; j < acct->fixed_nr; j++) {
+			if (!workers[j])
+				continue;
+			workers[j]->flags |= IO_WORKER_F_EXIT;
+			wake_up_process(worker->task);
+		}
+		kfree(workers);
+	}
+}
+
+/*
+ * Set number of fixed workers.
+ */
+int io_wq_fixed_workers(struct io_wq *wq, struct io_uring_fixed_worker_arg *count)
+{
+	struct io_wq_acct *acct;
+	int i, j, ret = 0;
+
+	for (i = 0; i < IO_WQ_ACCT_NR; i++) {
+		if (wq->acct[i].fixed_nr) {
+			ret = -EBUSY;
+			break;
+		}
+	}
+	if (ret)
+		return ret;
+
+	BUILD_BUG_ON((int) IO_WQ_ACCT_BOUND   != (int) IO_WQ_BOUND);
+	BUILD_BUG_ON((int) IO_WQ_ACCT_UNBOUND != (int) IO_WQ_UNBOUND);
+	BUILD_BUG_ON((int) IO_WQ_ACCT_NR      != 2);
+
+	for (i = 0; i < IO_WQ_ACCT_NR; i++) {
+		if (count[i].nr_workers > task_rlimit(current, RLIMIT_NPROC))
+			count[i].nr_workers =
+				task_rlimit(current, RLIMIT_NPROC);
+	}
+
+	rcu_read_lock();
+
+	for (i = 0; i < IO_WQ_ACCT_NR; i++) {
+		unsigned int nr = count[i].nr_workers;
+
+		acct = &wq->acct[i];
+		acct->fixed_nr = nr;
+		acct->fixed_workers = kcalloc(nr, sizeof(struct io_worker *),
+					      GFP_KERNEL);
+		if (!acct->fixed_workers) {
+			ret = -ENOMEM;
+			break;
+		}
+
+		for (j = 0; j < nr; j++) {
+			struct io_worker *worker =
+				io_wq_create_worker(wq, acct, true);
+			if (IS_ERR(worker)) {
+				ret = PTR_ERR(worker);
+				break;
+			}
+			acct->fixed_workers[j] = worker;
+		}
+		if (j < nr)
+			break;
+	}
+	rcu_read_unlock();
+
+	if (ret)
+		goto err;
+	return 0;
+
+err:
+	io_wq_clean_fixed_workers(wq);
+	return ret;
+}
+
 static __init int io_wq_init(void)
 {
 	int ret;

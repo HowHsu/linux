@@ -535,6 +535,9 @@ enum {
 	/* register a range of fixed file slots for automatic slot allocation */
 	IORING_REGISTER_FILE_ALLOC_RANGE	= 25,
 
+	/* set/get number of fixed workers */
+	IORING_REGISTER_IOWQ_FIXED_WORKERS      = 26,
+
 	/* this goes last */
 	IORING_REGISTER_LAST,
 
@@ -713,6 +716,12 @@ struct io_uring_recvmsg_out {
 	__u32 controllen;
 	__u32 payloadlen;
 	__u32 flags;
+};
+
+struct io_uring_fixed_worker_arg {
+	__u32	nr_workers;
+	__u32	resv;
+	__u64	resv2[3];
 };
 
 #ifdef __cplusplus
