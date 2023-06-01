@@ -30,6 +30,7 @@ enum {
 	IO_WORKER_F_FREE	= 4,	/* worker on free list */
 	IO_WORKER_F_BOUND	= 8,	/* is doing bounded work */
 	IO_WORKER_F_EXIT	= 16,	/* worker is exiting */
+	IO_WORKER_F_FIXED	= 32,	/* is a fixed worker */
 };
 
 enum {
@@ -598,6 +599,11 @@ static bool is_worker_exiting(struct io_worker *worker)
 	return worker->flags & IO_WORKER_F_EXIT;
 }
 
+static bool is_fixed_worker(struct io_worker *worker)
+{
+	return worker->flags & IO_WORKER_F_FIXED;
+}
+
 static int io_wq_worker(void *data)
 {
 	struct io_worker *worker = data;
@@ -622,8 +628,13 @@ static int io_wq_worker(void *data)
 		/*
 		 * Last sleep timed out. Exit if we're not the last worker,
 		 * or if someone modified our affinity.
+		 * Note: fixed worker always have same lifecycle as io-wq
+		 * itself, and cpu affinity setting doesn't work well for
+		 * fixed worker, they can be manually reset to cpu other than
+		 * the cpuset indicated by io_wq_worker_affinity()
 		 */
-		if (last_timeout && (exit_mask || acct->nr_workers > 1)) {
+		if (!is_fixed_worker(worker) && last_timeout &&
+		    (exit_mask || acct->nr_workers > 1)) {
 			acct->nr_workers--;
 			raw_spin_unlock(&wq->lock);
 			__set_current_state(TASK_RUNNING);
