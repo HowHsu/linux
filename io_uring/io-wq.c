@@ -84,6 +84,8 @@ struct io_wq_acct {
 	raw_spinlock_t lock;
 	struct io_wq_work_list work_list;
 	unsigned long flags;
+	struct io_worker **fixed_workers;
+	unsigned int fixed_nr;
 };
 
 enum {
