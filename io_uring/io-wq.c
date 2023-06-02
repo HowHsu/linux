@@ -137,7 +137,7 @@ struct io_cb_cancel_data {
 	bool cancel_all;
 };
 
-static bool create_io_worker(struct io_wq *wq, int index, bool fixed);
+static struct io_worker *create_io_worker(struct io_wq *wq, int index, bool fixed);
 static void io_wq_dec_running(struct io_worker *worker);
 static bool io_acct_cancel_pending_work(struct io_wq *wq,
 					struct io_wq_acct *acct,
@@ -284,8 +284,8 @@ static bool io_wq_activate_free_worker(struct io_wq *wq,
  * We need a worker. If we find a free one, we're good. If not, and we're
  * below the max number of workers, create one.
  */
-static bool io_wq_create_worker(struct io_wq *wq, struct io_wq_acct *acct,
-				bool fixed)
+static struct io_worker *io_wq_create_worker(struct io_wq *wq,
+					     struct io_wq_acct *acct, bool fixed)
 {
 	/*
 	 * Most likely an attempt to queue unbounded work on an io_wq that
@@ -297,7 +297,7 @@ static bool io_wq_create_worker(struct io_wq *wq, struct io_wq_acct *acct,
 	raw_spin_lock(&wq->lock);
 	if (acct->nr_workers >= acct->max_workers) {
 		raw_spin_unlock(&wq->lock);
-		return true;
+		return NULL;
 	}
 	acct->nr_workers++;
 	raw_spin_unlock(&wq->lock);
@@ -809,11 +809,11 @@ static void io_workqueue_create(struct work_struct *work)
 		kfree(worker);
 }
 
-static bool create_io_worker(struct io_wq *wq, int index, bool fixed)
+static struct io_worker *create_io_worker(struct io_wq *wq, int index, bool fixed)
 {
 	struct io_wq_acct *acct = &wq->acct[index];
 	struct io_worker *worker;
-	struct task_struct *tsk;
+	struct task_struct *tsk = NULL;
 
 	__set_current_state(TASK_RUNNING);
 
@@ -825,7 +825,7 @@ fail:
 		acct->nr_workers--;
 		raw_spin_unlock(&wq->lock);
 		io_worker_ref_put(wq);
-		return false;
+		return tsk ? (struct io_worker *)tsk : ERR_PTR(-ENOMEM);
 	}
 
 	refcount_set(&worker->ref, 1);
@@ -841,8 +841,8 @@ fail:
 
 	tsk = create_io_thread(io_wq_worker, worker, NUMA_NO_NODE);
 	if (!IS_ERR(tsk)) {
-		if (!fixed)
-			io_init_new_worker(wq, worker, tsk);
+		io_init_new_worker(wq, worker, tsk);
+		return worker;
 	} else if (fixed || !io_should_retry_thread(PTR_ERR(tsk))) {
 		kfree(worker);
 		goto fail;
@@ -851,7 +851,7 @@ fail:
 		schedule_work(&worker->work);
 	}
 
-	return true;
+	return (struct io_worker *)tsk;
 }
 
 /*
