@@ -1386,7 +1386,7 @@ static void io_wq_clean_fixed_workers(struct io_wq *wq)
 			if (!workers[j])
 				continue;
 			workers[j]->flags |= IO_WORKER_F_EXIT;
-			wake_up_process(worker->task);
+			wake_up_process(workers[j]->task);
 		}
 		kfree(workers);
 	}
@@ -1454,6 +1454,54 @@ int io_wq_fixed_workers(struct io_wq *wq, struct io_uring_fixed_worker_arg *coun
 err:
 	io_wq_clean_fixed_workers(wq);
 	return ret;
+}
+
+/*
+ * destroy fixed workers.
+ */
+int io_wq_destroy_fixed_workers(struct io_wq *wq)
+{
+	int i, j;
+
+	raw_spin_lock(&wq->lock);
+	for (i = 0; i < IO_WQ_ACCT_NR; i++) {
+		if (wq->acct[i].fixed_nr)
+			break;
+	}
+	raw_spin_unlock(&wq->lock);
+	if (i == IO_WQ_ACCT_NR)
+		return -EFAULT;
+
+	BUILD_BUG_ON((int) IO_WQ_ACCT_BOUND   != (int) IO_WQ_BOUND);
+	BUILD_BUG_ON((int) IO_WQ_ACCT_UNBOUND != (int) IO_WQ_UNBOUND);
+	BUILD_BUG_ON((int) IO_WQ_ACCT_NR      != 2);
+
+	rcu_read_lock();
+	raw_spin_lock(&wq->lock);
+	for (i = 0; i < IO_WQ_ACCT_NR; i++) {
+		struct io_wq_acct *acct = &wq->acct[i];
+		struct io_worker **workers = acct->fixed_workers;
+		unsigned int nr = acct->fixed_nr;
+
+		if (!nr)
+			continue;
+
+		for (j = 0; j < nr; j++) {
+			struct io_worker *worker = workers[j];
+
+			BUG_ON(!worker);
+			BUG_ON(!worker->task);
+
+			workers[j]->flags |= IO_WORKER_F_EXIT;
+			wake_up_process(worker->task);
+		}
+		// wait for all workers exit
+		kfree(workers);
+	}
+	raw_spin_unlock(&wq->lock);
+	rcu_read_unlock();
+
+	return 0;
 }
 
 static __init int io_wq_init(void)

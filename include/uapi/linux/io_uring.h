@@ -538,6 +538,9 @@ enum {
 	/* set/get number of fixed workers */
 	IORING_REGISTER_IOWQ_FIXED_WORKERS      = 26,
 
+	/* destroy fixed workers */
+	IORING_UNREGISTER_IOWQ_FIXED_WORKERS      = 27,
+
 	/* this goes last */
 	IORING_REGISTER_LAST,
 
