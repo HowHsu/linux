@@ -29,6 +29,7 @@ enum {
 	IO_WORKER_F_RUNNING	= 2,	/* account as running */
 	IO_WORKER_F_FREE	= 4,	/* worker on free list */
 	IO_WORKER_F_BOUND	= 8,	/* is doing bounded work */
+	IO_WORKER_F_EXIT	= 16,	/* worker is exiting */
 };
 
 enum {
@@ -592,6 +593,11 @@ static void io_worker_handle_work(struct io_worker *worker)
 	} while (1);
 }
 
+static bool is_worker_exiting(struct io_worker *worker)
+{
+	return worker->flags & IO_WORKER_F_EXIT;
+}
+
 static int io_wq_worker(void *data)
 {
 	struct io_worker *worker = data;
@@ -609,7 +615,7 @@ static int io_wq_worker(void *data)
 		long ret;
 
 		set_current_state(TASK_INTERRUPTIBLE);
-		while (io_acct_run_queue(acct))
+		while (!is_worker_exiting(worker) && io_acct_run_queue(acct))
 			io_worker_handle_work(worker);
 
 		raw_spin_lock(&wq->lock);
@@ -628,6 +634,12 @@ static int io_wq_worker(void *data)
 		raw_spin_unlock(&wq->lock);
 		if (io_run_task_work())
 			continue;
+		if (is_worker_exiting(worker)) {
+			raw_spin_lock(&wq->lock);
+			acct->nr_workers--;
+			raw_spin_unlock(&wq->lock);
+			break;
+		}
 		ret = schedule_timeout(WORKER_IDLE_TIMEOUT);
 		if (signal_pending(current)) {
 			struct ksignal ksig;
