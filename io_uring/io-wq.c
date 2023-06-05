@@ -634,6 +634,10 @@ static int io_wq_worker(void *data)
 
 			if (!get_signal(&ksig))
 				continue;
+
+			raw_spin_lock(&wq->lock);
+			acct->nr_workers--;
+			raw_spin_unlock(&wq->lock);
 			break;
 		}
 		if (!ret) {
