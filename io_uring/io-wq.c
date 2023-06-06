@@ -634,10 +634,12 @@ static int io_wq_worker(void *data)
 	struct io_wq *wq = worker->wq;
 	bool exit_mask = false, last_timeout = false;
 	char buf[TASK_COMM_LEN];
+	bool fixed = is_fixed_worker(worker);
 
 	worker->flags |= (IO_WORKER_F_UP | IO_WORKER_F_RUNNING);
 
-	snprintf(buf, sizeof(buf), "iou-wrk-%d", wq->task->pid);
+	snprintf(buf, sizeof(buf), fixed ? "iou-fixed-%d" : "iou-wrk-%d",
+		 wq->task->pid);
 	set_task_comm(current, buf);
 
 	while (!test_bit(IO_WQ_BIT_EXIT, &wq->state)) {
@@ -656,7 +658,7 @@ static int io_wq_worker(void *data)
 		 * fixed worker, they can be manually reset to cpu other than
 		 * the cpuset indicated by io_wq_worker_affinity()
 		 */
-		if (!is_fixed_worker(worker) && last_timeout &&
+		if (!fixed && last_timeout &&
 		    (exit_mask || acct->nr_workers > 1)) {
 			acct->nr_workers--;
 			raw_spin_unlock(&wq->lock);
