@@ -185,6 +185,11 @@ enum {
  */
 #define IORING_SETUP_REGISTERED_FD_ONLY	(1U << 15)
 
+/*
+ * this ring instance only use fixed worker for async offload.
+ */
+#define IORING_SETUP_FIXED_WORKER_ONLY	(1U << 16)
+
 enum io_uring_op {
 	IORING_OP_NOP,
 	IORING_OP_READV,
@@ -721,9 +726,12 @@ struct io_uring_recvmsg_out {
 	__u32 flags;
 };
 
+#define IORING_FIXED_WORKER_F_ONLY (1U << 0)
+#define IORING_FIXED_WORKER_F_VALID (IORING_FIXED_WORKER_F_ONLY)
+
 struct io_uring_fixed_worker_arg {
 	__u32	nr_workers;
-	__u32	resv;
+	__u32	flags;
 	__u64	resv2[3];
 };
 

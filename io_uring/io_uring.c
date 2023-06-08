@@ -479,6 +479,9 @@ void io_queue_iowq(struct io_kiocb *req, struct io_tw_state *ts_dont_use)
 	if (WARN_ON_ONCE(!same_thread_group(req->task, current)))
 		req->work.flags |= IO_WQ_WORK_CANCEL;
 
+	if (req->ctx->flags & IORING_SETUP_FIXED_WORKER_ONLY)
+		req->work.flags |= IO_WQ_WORK_FIXED;
+
 	trace_io_uring_queue_async_work(req, io_wq_is_hashed(&req->work));
 	io_wq_enqueue(tctx->io_wq, &req->work);
 	if (link)
@@ -1971,7 +1974,12 @@ struct io_wq_work *io_wq_free_work(struct io_wq_work *work)
 	struct io_kiocb *req = container_of(work, struct io_kiocb, work);
 
 	req = io_put_req_find_next(req);
-	return req ? &req->work : NULL;
+	if (req) {
+		req->work.flags |= IO_WQ_WORK_FIXED;
+		return &req->work;
+	}
+
+	return NULL;
 }
 
 void io_wq_submit_work(struct io_wq_work *work)
@@ -4364,7 +4372,7 @@ static __cold int io_register_iowq_fixed_workers(struct io_ring_ctx *ctx,
 	struct io_uring_fixed_worker_arg *res;
 	size_t size;
 	int i, ret;
-	bool zero = true;
+	bool zero = true, fixed_only = false;
 
 	size = array_size(nr_args, sizeof(*res));
 	if (size == SIZE_MAX)
@@ -4375,14 +4383,19 @@ static __cold int io_register_iowq_fixed_workers(struct io_ring_ctx *ctx,
 		return PTR_ERR(res);
 
 	for (i = 0; i < nr_args; i++) {
-		if (res[i].nr_workers) {
+		if (res[i].flags & ~IORING_FIXED_WORKER_F_VALID)
+			return -EINVAL;
+		if (res[i].flags & IORING_FIXED_WORKER_F_ONLY)
+			fixed_only = true;
+		if (res[i].nr_workers)
 			zero = false;
-			break;
-		}
 	}
 
 	if (zero)
 		return 0;
+
+	if (fixed_only)
+		ctx->flags |= IORING_SETUP_FIXED_WORKER_ONLY;
 
 	if (ctx->flags & IORING_SETUP_SQPOLL) {
 		sqd = ctx->sq_data;
@@ -4423,6 +4436,7 @@ static __cold int io_unregister_iowq_fixed_workers(struct io_ring_ctx *ctx)
 	struct io_sq_data *sqd = NULL;
 	int ret;
 
+	ctx->flags &= ~IORING_SETUP_FIXED_WORKER_ONLY;
 	if (ctx->flags & IORING_SETUP_SQPOLL) {
 		sqd = ctx->sq_data;
 		if (sqd) {

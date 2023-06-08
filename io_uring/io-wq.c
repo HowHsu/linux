@@ -272,7 +272,7 @@ static inline bool io_acct_run_queue(struct io_wq_acct *acct)
  * caller must create one.
  */
 static bool io_wq_activate_free_worker(struct io_wq *wq,
-					struct io_wq_acct *acct)
+					struct io_wq_acct *acct, bool fixed)
 	__must_hold(RCU)
 {
 	struct hlist_nulls_node *n;
@@ -286,7 +286,8 @@ static bool io_wq_activate_free_worker(struct io_wq *wq,
 	hlist_nulls_for_each_entry_rcu(worker, n, &wq->free_list, nulls_node) {
 		if (!io_worker_get(worker))
 			continue;
-		if (io_wq_get_acct(worker) != acct) {
+		if (io_wq_get_acct(worker) != acct ||
+		    (fixed && !is_fixed_worker(worker))) {
 			io_worker_release(worker);
 			continue;
 		}
@@ -491,6 +492,9 @@ static struct io_wq_work *io_get_next_work(struct io_wq_acct *acct,
 		unsigned int hash;
 
 		work = container_of(node, struct io_wq_work, list);
+
+		if ((work->flags & IO_WQ_WORK_FIXED) && !is_fixed_worker(worker))
+			continue;
 
 		/* not hashed, can run anytime */
 		if (!io_wq_is_hashed(work)) {
@@ -946,7 +950,7 @@ void io_wq_enqueue(struct io_wq *wq, struct io_wq_work *work)
 	struct io_wq_acct *acct = io_work_get_acct(wq, work);
 	struct io_cb_cancel_data match;
 	unsigned work_flags = work->flags;
-	bool do_create;
+	bool do_create, fixed = work_flags & IO_WQ_WORK_FIXED;
 
 	/*
 	 * If io-wq is exiting for this task, or if the request has explicitly
@@ -965,10 +969,13 @@ void io_wq_enqueue(struct io_wq *wq, struct io_wq_work *work)
 
 	raw_spin_lock(&wq->lock);
 	rcu_read_lock();
-	do_create = !io_wq_activate_free_worker(wq, acct);
+	do_create = !io_wq_activate_free_worker(wq, acct, fixed);
 	rcu_read_unlock();
 
 	raw_spin_unlock(&wq->lock);
+
+	if (fixed)
+		return;
 
 	if (do_create && ((work_flags & IO_WQ_WORK_CONCURRENT) ||
 	    !atomic_read(&acct->nr_running))) {
@@ -1155,7 +1162,7 @@ static int io_wq_hash_wake(struct wait_queue_entry *wait, unsigned mode,
 		struct io_wq_acct *acct = &wq->acct[i];
 
 		if (test_and_clear_bit(IO_ACCT_STALLED_BIT, &acct->flags))
-			io_wq_activate_free_worker(wq, acct);
+			io_wq_activate_free_worker(wq, acct, false);
 	}
 	rcu_read_unlock();
 	return 1;
@@ -1477,6 +1484,7 @@ int io_wq_fixed_workers(struct io_wq *wq, struct io_uring_fixed_worker_arg *coun
 
 	if (ret)
 		goto err;
+
 	return 0;
 
 err:
