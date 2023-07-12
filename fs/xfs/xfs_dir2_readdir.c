@@ -149,6 +149,7 @@ xfs_dir2_block_getdents(
 	struct xfs_da_geometry	*geo = args->geo;
 	unsigned int		offset, next_offset;
 	unsigned int		end;
+	unsigned int		flags = 0;
 
 	/*
 	 * If the block number in the offset is out of range, we're done.
@@ -156,7 +157,9 @@ xfs_dir2_block_getdents(
 	if (xfs_dir2_dataptr_to_db(geo, ctx->pos) > geo->datablk)
 		return 0;
 
-	error = xfs_dir3_block_read(args->trans, dp, &bp);
+	if (ctx->flags & DIR_CONTEXT_F_NOWAIT)
+		flags |= XFS_DABUF_NOWAIT;
+	error = xfs_dir3_block_read(args->trans, dp, flags, &bp);
 	if (error)
 		return error;
 
@@ -240,6 +243,7 @@ out_rele:
 STATIC int
 xfs_dir2_leaf_readbuf(
 	struct xfs_da_args	*args,
+	struct dir_context	*ctx,
 	size_t			bufsize,
 	xfs_dir2_off_t		*cur_off,
 	xfs_dablk_t		*ra_blk,
@@ -258,10 +262,15 @@ xfs_dir2_leaf_readbuf(
 	struct xfs_iext_cursor	icur;
 	int			ra_want;
 	int			error = 0;
+	unsigned int		flags = 0;
 
-	error = xfs_iread_extents(args->trans, dp, XFS_DATA_FORK);
-	if (error)
-		goto out;
+	if (ctx->flags & DIR_CONTEXT_F_NOWAIT) {
+		flags |= XFS_DABUF_NOWAIT;
+	} else {
+		error = xfs_iread_extents(args->trans, dp, XFS_DATA_FORK);
+		if (error)
+			goto out;
+	}
 
 	/*
 	 * Look for mapped directory blocks at or above the current offset.
@@ -280,7 +289,7 @@ xfs_dir2_leaf_readbuf(
 	new_off = xfs_dir2_da_to_byte(geo, map.br_startoff);
 	if (new_off > *cur_off)
 		*cur_off = new_off;
-	error = xfs_dir3_data_read(args->trans, dp, map.br_startoff, 0, &bp);
+	error = xfs_dir3_data_read(args->trans, dp, map.br_startoff, flags, &bp);
 	if (error)
 		goto out;
 
@@ -360,6 +369,7 @@ xfs_dir2_leaf_getdents(
 	int			byteoff;	/* offset in current block */
 	unsigned int		offset = 0;
 	int			error = 0;	/* error return value */
+	int			written = 0;
 
 	/*
 	 * If the offset is at or past the largest allowed value,
@@ -391,10 +401,17 @@ xfs_dir2_leaf_getdents(
 				bp = NULL;
 			}
 
-			if (*lock_mode == 0)
-				*lock_mode = xfs_ilock_data_map_shared(dp);
-			error = xfs_dir2_leaf_readbuf(args, bufsize, &curoff,
-					&rablk, &bp);
+			if (*lock_mode == 0) {
+				*lock_mode =
+					xfs_ilock_data_map_shared_generic(dp,
+					ctx->flags & DIR_CONTEXT_F_NOWAIT);
+				if (!*lock_mode) {
+					error = -EAGAIN;
+					break;
+				}
+			}
+			error = xfs_dir2_leaf_readbuf(args, ctx, bufsize,
+					&curoff, &rablk, &bp);
 			if (error || !bp)
 				break;
 
@@ -479,6 +496,7 @@ xfs_dir2_leaf_getdents(
 		 */
 		offset += length;
 		curoff += length;
+		written += length;
 		/* bufsize may have just been a guess; don't go negative */
 		bufsize = bufsize > length ? bufsize - length : 0;
 	}
@@ -492,6 +510,8 @@ xfs_dir2_leaf_getdents(
 		ctx->pos = xfs_dir2_byte_to_dataptr(curoff) & 0x7fffffff;
 	if (bp)
 		xfs_trans_brelse(args->trans, bp);
+	if (error == -EAGAIN && written > 0)
+		error = 0;
 	return error;
 }
 
@@ -514,6 +534,7 @@ xfs_readdir(
 	unsigned int		lock_mode;
 	bool			isblock;
 	int			error;
+	bool			nowait;
 
 	trace_xfs_readdir(dp);
 
@@ -531,7 +552,11 @@ xfs_readdir(
 	if (dp->i_df.if_format == XFS_DINODE_FMT_LOCAL)
 		return xfs_dir2_sf_getdents(&args, ctx);
 
-	lock_mode = xfs_ilock_data_map_shared(dp);
+	nowait = ctx->flags & DIR_CONTEXT_F_NOWAIT;
+	lock_mode = xfs_ilock_data_map_shared_generic(dp, nowait);
+	if (!lock_mode)
+		return -EAGAIN;
+
 	error = xfs_dir2_isblock(&args, &isblock);
 	if (error)
 		goto out_unlock;
@@ -546,5 +571,7 @@ xfs_readdir(
 out_unlock:
 	if (lock_mode)
 		xfs_iunlock(dp, lock_mode);
+	if (error == -EAGAIN)
+		ASSERT(nowait);
 	return error;
 }

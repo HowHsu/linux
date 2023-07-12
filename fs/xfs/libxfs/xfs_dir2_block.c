@@ -135,13 +135,14 @@ int
 xfs_dir3_block_read(
 	struct xfs_trans	*tp,
 	struct xfs_inode	*dp,
+	unsigned int		flags,
 	struct xfs_buf		**bpp)
 {
 	struct xfs_mount	*mp = dp->i_mount;
 	xfs_failaddr_t		fa;
 	int			err;
 
-	err = xfs_da_read_buf(tp, dp, mp->m_dir_geo->datablk, 0, bpp,
+	err = xfs_da_read_buf(tp, dp, mp->m_dir_geo->datablk, flags, bpp,
 				XFS_DATA_FORK, &xfs_dir3_block_buf_ops);
 	if (err || !*bpp)
 		return err;
@@ -380,7 +381,7 @@ xfs_dir2_block_addname(
 	tp = args->trans;
 
 	/* Read the (one and only) directory block into bp. */
-	error = xfs_dir3_block_read(tp, dp, &bp);
+	error = xfs_dir3_block_read(tp, dp, 0, &bp);
 	if (error)
 		return error;
 
@@ -695,7 +696,7 @@ xfs_dir2_block_lookup_int(
 	dp = args->dp;
 	tp = args->trans;
 
-	error = xfs_dir3_block_read(tp, dp, &bp);
+	error = xfs_dir3_block_read(tp, dp, 0, &bp);
 	if (error)
 		return error;
 

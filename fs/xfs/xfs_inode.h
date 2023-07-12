@@ -490,13 +490,16 @@ int		xfs_rename(struct mnt_idmap *idmap,
 			   struct xfs_name *target_name,
 			   struct xfs_inode *target_ip, unsigned int flags);
 
-void		xfs_ilock(xfs_inode_t *, uint);
-int		xfs_ilock_nowait(xfs_inode_t *, uint);
-void		xfs_iunlock(xfs_inode_t *, uint);
-void		xfs_ilock_demote(xfs_inode_t *, uint);
-bool		xfs_isilocked(struct xfs_inode *, uint);
-uint		xfs_ilock_data_map_shared(struct xfs_inode *);
-uint		xfs_ilock_attr_map_shared(struct xfs_inode *);
+void		xfs_ilock(struct xfs_inode *ip, uint lockmode);
+int		xfs_ilock_nowait(struct xfs_inode *ip, uint lockmode);
+void		xfs_iunlock(struct xfs_inode *ip, uint lockmode);
+void		xfs_ilock_demote(struct xfs_inode *ip, uint lockmode);
+bool		xfs_isilocked(struct xfs_inode *ip, uint lockmode);
+uint		xfs_ilock_data_map_shared(struct xfs_inode *ip);
+uint		xfs_ilock_data_map_shared_nowait(struct xfs_inode *ip);
+int		xfs_ilock_data_map_shared_generic(struct xfs_inode *ip,
+						  bool nowait);
+uint		xfs_ilock_attr_map_shared(struct xfs_inode *ip);
 
 uint		xfs_ip2xflags(struct xfs_inode *);
 int		xfs_ifree(struct xfs_trans *, struct xfs_inode *);

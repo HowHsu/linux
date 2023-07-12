@@ -2643,16 +2643,32 @@ xfs_da_read_buf(
 	struct xfs_buf_map	map, *mapp = &map;
 	int			nmap = 1;
 	int			error;
+	int			buf_flags = 0;
 
 	*bpp = NULL;
 	error = xfs_dabuf_map(dp, bno, flags, whichfork, &mapp, &nmap);
 	if (error || !nmap)
 		goto out_free;
 
+	/*
+	 * NOWAIT semantics mean we don't wait on the buffer lock nor do we
+	 * issue IO for this buffer if it is not already in memory. Caller will
+	 * retry. This will return -EAGAIN if the buffer is in memory and cannot
+	 * be locked, and no buffer and no error if it isn't in memory.  We
+	 * translate both of those into a return state of -EAGAIN and *bpp =
+	 * NULL.
+	 */
+	if (flags & XFS_DABUF_NOWAIT)
+		buf_flags |= XBF_TRYLOCK | XBF_INCORE;
 	error = xfs_trans_read_buf_map(mp, tp, mp->m_ddev_targp, mapp, nmap, 0,
 			&bp, ops);
 	if (error)
 		goto out_free;
+	if (!bp) {
+		ASSERT(flags & XFS_DABUF_NOWAIT);
+		error = -EAGAIN;
+		goto out_free;
+	}
 
 	if (whichfork == XFS_ATTR_FORK)
 		xfs_buf_set_ref(bp, XFS_ATTR_BTREE_REF);

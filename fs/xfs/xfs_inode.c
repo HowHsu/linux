@@ -120,6 +120,33 @@ xfs_ilock_data_map_shared(
 	return lock_mode;
 }
 
+/*
+ * Similar to xfs_ilock_data_map_shared(), except that it will only try to lock
+ * the inode in shared mode if the extents are already in memory. If it fails to
+ * get the lock or has to do IO to read the extent list, fail the operation by
+ * returning 0 as the lock mode.
+ */
+uint
+xfs_ilock_data_map_shared_nowait(
+	struct xfs_inode	*ip)
+{
+	if (xfs_need_iread_extents(&ip->i_df))
+		return 0;
+	if (!xfs_ilock_nowait(ip, XFS_ILOCK_SHARED))
+		return 0;
+	return XFS_ILOCK_SHARED;
+}
+
+int
+xfs_ilock_data_map_shared_generic(
+	struct xfs_inode	*dp,
+	bool			nowait)
+{
+	if (nowait)
+		return xfs_ilock_data_map_shared_nowait(dp);
+	return xfs_ilock_data_map_shared(dp);
+}
+
 uint
 xfs_ilock_attr_map_shared(
 	struct xfs_inode	*ip)
