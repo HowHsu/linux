@@ -1603,7 +1603,7 @@ static int ubifs_file_mmap(struct file *file, struct vm_area_struct *vma)
 	vma->vm_ops = &ubifs_file_vm_ops;
 
 	if (IS_ENABLED(CONFIG_UBIFS_ATIME_SUPPORT))
-		file_accessed(file);
+		file_accessed(file, false);
 
 	return 0;
 }

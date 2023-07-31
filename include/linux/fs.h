@@ -2204,10 +2204,11 @@ extern bool atime_needs_update(const struct path *, struct inode *);
 extern int touch_atime(const struct path *path, bool nowait);
 int inode_update_time(struct inode *inode, struct timespec64 *time, int flags);
 
-static inline void file_accessed(struct file *file)
+static inline int file_accessed(struct file *file, bool nowait)
 {
 	if (!(file->f_flags & O_NOATIME))
-		touch_atime(&file->f_path, false);
+		return touch_atime(&file->f_path, nowait);
+	return 0;
 }
 
 extern int file_modified(struct file *file);

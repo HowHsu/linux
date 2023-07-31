@@ -119,7 +119,7 @@ static const struct vm_operations_struct nilfs_file_vm_ops = {
 
 static int nilfs_file_mmap(struct file *file, struct vm_area_struct *vma)
 {
-	file_accessed(file);
+	file_accessed(file, false);
 	vma->vm_ops = &nilfs_file_vm_ops;
 	return 0;
 }

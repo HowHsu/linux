@@ -227,7 +227,7 @@ xfs_file_dio_read(
 	if (!iov_iter_count(to))
 		return 0; /* skip atime */
 
-	file_accessed(iocb->ki_filp);
+	file_accessed(iocb->ki_filp, false);
 
 	ret = xfs_ilock_iocb(iocb, XFS_IOLOCK_SHARED);
 	if (ret)
@@ -257,7 +257,7 @@ xfs_file_dax_read(
 	ret = dax_iomap_rw(iocb, to, &xfs_read_iomap_ops);
 	xfs_iunlock(ip, XFS_IOLOCK_SHARED);
 
-	file_accessed(iocb->ki_filp);
+	file_accessed(iocb->ki_filp, false);
 	return ret;
 }
 
@@ -1434,7 +1434,7 @@ xfs_file_mmap(
 	if (!daxdev_mapping_supported(vma, target->bt_daxdev))
 		return -EOPNOTSUPP;
 
-	file_accessed(file);
+	file_accessed(file, false);
 	vma->vm_ops = &xfs_file_vm_ops;
 	if (IS_DAX(inode))
 		vm_flags_set(vma, VM_HUGEPAGE);

@@ -601,7 +601,7 @@ static ssize_t blkdev_read_iter(struct kiocb *iocb, struct iov_iter *to)
 		ret = kiocb_write_and_wait(iocb, count);
 		if (ret < 0)
 			goto reexpand;
-		file_accessed(iocb->ki_filp);
+		file_accessed(iocb->ki_filp, false);
 
 		ret = blkdev_direct_IO(iocb, to);
 		if (ret >= 0) {

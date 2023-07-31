@@ -10153,7 +10153,7 @@ ssize_t btrfs_encoded_read(struct kiocb *iocb, struct iov_iter *iter,
 	struct extent_map *em;
 	bool unlocked = false;
 
-	file_accessed(iocb->ki_filp);
+	file_accessed(iocb->ki_filp, false);
 
 	btrfs_inode_lock(inode, BTRFS_ILOCK_SHARED);
 

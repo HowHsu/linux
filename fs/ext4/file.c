@@ -94,7 +94,7 @@ static ssize_t ext4_dio_read_iter(struct kiocb *iocb, struct iov_iter *to)
 	ret = iomap_dio_rw(iocb, to, &ext4_iomap_ops, NULL, 0, NULL, 0);
 	inode_unlock_shared(inode);
 
-	file_accessed(iocb->ki_filp);
+	file_accessed(iocb->ki_filp, false);
 	return ret;
 }
 
@@ -122,7 +122,7 @@ static ssize_t ext4_dax_read_iter(struct kiocb *iocb, struct iov_iter *to)
 	ret = dax_iomap_rw(iocb, to, &ext4_iomap_ops);
 	inode_unlock_shared(inode);
 
-	file_accessed(iocb->ki_filp);
+	file_accessed(iocb->ki_filp, false);
 	return ret;
 }
 #endif
@@ -820,7 +820,7 @@ static int ext4_file_mmap(struct file *file, struct vm_area_struct *vma)
 	if (!daxdev_mapping_supported(vma, dax_dev))
 		return -EOPNOTSUPP;
 
-	file_accessed(file);
+	file_accessed(file, false);
 	if (IS_DAX(file_inode(file))) {
 		vma->vm_ops = &ext4_dax_vm_ops;
 		vm_flags_set(vma, VM_HUGEPAGE);

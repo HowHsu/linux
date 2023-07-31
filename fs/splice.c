@@ -1104,7 +1104,7 @@ ssize_t splice_direct_to_actor(struct file *in, struct splice_desc *sd,
 
 done:
 	pipe->tail = pipe->head = 0;
-	file_accessed(in);
+	file_accessed(in, false);
 	return bytes;
 
 read_failure:

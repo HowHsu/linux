@@ -2013,7 +2013,7 @@ static int btrfs_file_mmap(struct file	*filp, struct vm_area_struct *vma)
 	if (!mapping->a_ops->read_folio)
 		return -ENOEXEC;
 
-	file_accessed(filp);
+	file_accessed(filp, false);
 	vma->vm_ops = &btrfs_file_vm_ops;
 
 	return 0;

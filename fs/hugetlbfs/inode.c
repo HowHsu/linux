@@ -161,7 +161,7 @@ static int hugetlbfs_file_mmap(struct file *file, struct vm_area_struct *vma)
 		return -EINVAL;
 
 	inode_lock(inode);
-	file_accessed(file);
+	file_accessed(file, false);
 
 	ret = -ENOMEM;
 	if (!hugetlb_reserve_pages(inode,

@@ -2496,7 +2496,7 @@ static int fuse_file_mmap(struct file *file, struct vm_area_struct *vma)
 	if ((vma->vm_flags & VM_SHARED) && (vma->vm_flags & VM_MAYWRITE))
 		fuse_link_write_file(file);
 
-	file_accessed(file);
+	file_accessed(file, false);
 	vma->vm_ops = &fuse_file_vm_ops;
 	return 0;
 }
@@ -3193,7 +3193,7 @@ out:
 		clear_bit(FUSE_I_SIZE_UNSTABLE, &fi_out->state);
 
 	inode_unlock(inode_out);
-	file_accessed(file_in);
+	file_accessed(file_in, false);
 
 	fuse_flush_time_update(inode_out);
 

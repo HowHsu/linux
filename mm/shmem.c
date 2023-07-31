@@ -2317,7 +2317,7 @@ static int shmem_mmap(struct file *file, struct vm_area_struct *vma)
 	/* arm64 - allow memory tagging on RAM-based files */
 	vm_flags_set(vma, VM_MTE_ALLOWED);
 
-	file_accessed(file);
+	file_accessed(file, false);
 	/* This is anonymous shared memory if it is unlinked at the time of mmap */
 	if (inode->i_nlink)
 		vma->vm_ops = &shmem_vm_ops;
@@ -2727,7 +2727,7 @@ static ssize_t shmem_file_read_iter(struct kiocb *iocb, struct iov_iter *to)
 	}
 
 	*ppos = ((loff_t) index << PAGE_SHIFT) + offset;
-	file_accessed(file);
+	file_accessed(file, false);
 	return retval ? retval : error;
 }
 
@@ -2859,7 +2859,7 @@ static ssize_t shmem_file_splice_read(struct file *in, loff_t *ppos,
 	if (folio)
 		folio_put(folio);
 
-	file_accessed(in);
+	file_accessed(in, false);
 	return total_spliced ? total_spliced : error;
 }
 

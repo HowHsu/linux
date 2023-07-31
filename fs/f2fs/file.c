@@ -524,7 +524,7 @@ static int f2fs_file_mmap(struct file *file, struct vm_area_struct *vma)
 	if (!f2fs_is_compress_backend_ready(inode))
 		return -EOPNOTSUPP;
 
-	file_accessed(file);
+	file_accessed(file, false);
 	vma->vm_ops = &f2fs_file_vm_ops;
 	set_inode_flag(inode, FI_MMAP_FILE);
 	return 0;
@@ -4380,7 +4380,7 @@ static ssize_t f2fs_dio_read_iter(struct kiocb *iocb, struct iov_iter *to)
 
 	f2fs_up_read(&fi->i_gc_rwsem[READ]);
 
-	file_accessed(file);
+	file_accessed(file, false);
 out:
 	trace_f2fs_direct_IO_exit(inode, pos, count, READ, ret);
 	return ret;

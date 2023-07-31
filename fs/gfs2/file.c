@@ -601,7 +601,7 @@ static int gfs2_mmap(struct file *file, struct vm_area_struct *vma)
 			return error;
 		/* grab lock to update inode */
 		gfs2_glock_dq_uninit(&i_gh);
-		file_accessed(file);
+		file_accessed(file, false);
 	}
 	vma->vm_ops = &gfs2_vm_ops;
 

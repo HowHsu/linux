@@ -267,7 +267,7 @@ static int ramfs_nommu_mmap(struct file *file, struct vm_area_struct *vma)
 	if (!is_nommu_shared_mapping(vma->vm_flags))
 		return -ENOSYS;
 
-	file_accessed(file);
+	file_accessed(file, false);
 	vma->vm_ops = &generic_file_vm_ops;
 	return 0;
 }

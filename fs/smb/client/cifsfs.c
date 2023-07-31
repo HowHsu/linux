@@ -1307,7 +1307,7 @@ ssize_t cifs_file_copychunk_range(unsigned int xid,
 		rc = target_tcon->ses->server->ops->copychunk_range(xid,
 			smb_file_src, smb_file_target, off, len, destoff);
 
-	file_accessed(src_file);
+	file_accessed(src_file, false);
 
 	/* force revalidate of size and timestamps of target file now
 	 * that target is updated on the server

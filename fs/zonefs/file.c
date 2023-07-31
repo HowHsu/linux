@@ -323,7 +323,7 @@ static int zonefs_file_mmap(struct file *file, struct vm_area_struct *vma)
 	    (vma->vm_flags & VM_SHARED) && (vma->vm_flags & VM_MAYWRITE))
 		return -EINVAL;
 
-	file_accessed(file);
+	file_accessed(file, false);
 	vma->vm_ops = &zonefs_file_vm_ops;
 
 	return 0;
@@ -736,7 +736,7 @@ static ssize_t zonefs_file_read_iter(struct kiocb *iocb, struct iov_iter *to)
 			ret = -EINVAL;
 			goto inode_unlock;
 		}
-		file_accessed(iocb->ki_filp);
+		file_accessed(iocb->ki_filp, false);
 		ret = iomap_dio_rw(iocb, to, &zonefs_read_iomap_ops,
 				   &zonefs_read_dio_ops, 0, NULL, 0);
 	} else {

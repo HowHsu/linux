@@ -597,7 +597,7 @@ out:
 		ret = total_count;
 	if (ret > 0) {
 		if (type == ORANGEFS_IO_READ) {
-			file_accessed(file);
+			file_accessed(file, false);
 		} else {
 			file_update_time(file);
 			if (*offset > i_size_read(inode))

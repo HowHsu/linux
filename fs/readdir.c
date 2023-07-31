@@ -68,7 +68,7 @@ int iterate_dir(struct file *file, struct dir_context *ctx)
 			res = file->f_op->iterate(file, ctx);
 		file->f_pos = ctx->pos;
 		fsnotify_access(file);
-		file_accessed(file);
+		file_accessed(file, ctx->flags & DIR_CONTEXT_F_NOWAIT);
 	}
 	if (shared)
 		inode_unlock_shared(inode);

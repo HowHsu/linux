@@ -412,7 +412,7 @@ static int orangefs_file_mmap(struct file *file, struct vm_area_struct *vma)
 	/* set the sequential readahead hint */
 	vm_flags_mod(vma, VM_SEQ_READ, VM_RAND_READ);
 
-	file_accessed(file);
+	file_accessed(file, false);
 	vma->vm_ops = &orangefs_file_vm_ops;
 	return 0;
 }

@@ -157,7 +157,7 @@ static ssize_t hypfs_read_iter(struct kiocb *iocb, struct iov_iter *to)
 	if (!count)
 		return -EFAULT;
 	iocb->ki_pos = pos + count;
-	file_accessed(file);
+	file_accessed(file, false);
 	return count;
 }
 

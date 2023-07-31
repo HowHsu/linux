@@ -44,7 +44,7 @@ static ssize_t ext2_dax_read_iter(struct kiocb *iocb, struct iov_iter *to)
 	ret = dax_iomap_rw(iocb, to, &ext2_iomap_ops);
 	inode_unlock_shared(inode);
 
-	file_accessed(iocb->ki_filp);
+	file_accessed(iocb->ki_filp, false);
 	return ret;
 }
 
@@ -127,7 +127,7 @@ static int ext2_file_mmap(struct file *file, struct vm_area_struct *vma)
 	if (!IS_DAX(file_inode(file)))
 		return generic_file_mmap(file, vma);
 
-	file_accessed(file);
+	file_accessed(file, false);
 	vma->vm_ops = &ext2_dax_vm_ops;
 	return 0;
 }

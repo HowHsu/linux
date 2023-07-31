@@ -191,7 +191,7 @@ static int udf_release_file(struct inode *inode, struct file *filp)
 
 static int udf_file_mmap(struct file *file, struct vm_area_struct *vma)
 {
-	file_accessed(file);
+	file_accessed(file, false);
 	vma->vm_ops = &udf_file_vm_ops;
 
 	return 0;

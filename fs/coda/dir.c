@@ -436,12 +436,12 @@ static int coda_readdir(struct file *coda_file, struct dir_context *ctx)
 			if (host_file->f_op->iterate_shared) {
 				inode_lock_shared(host_inode);
 				ret = host_file->f_op->iterate_shared(host_file, ctx);
-				file_accessed(host_file);
+				file_accessed(host_file, false);
 				inode_unlock_shared(host_inode);
 			} else {
 				inode_lock(host_inode);
 				ret = host_file->f_op->iterate(host_file, ctx);
-				file_accessed(host_file);
+				file_accessed(host_file, false);
 				inode_unlock(host_inode);
 			}
 		}
