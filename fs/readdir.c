@@ -61,6 +61,10 @@ int iterate_dir(struct file *file, struct dir_context *ctx)
 
 	res = -ENOENT;
 	if (!IS_DEADDIR(inode)) {
+		res = file_accessed(file, ctx->flags & DIR_CONTEXT_F_NOWAIT);
+		if (res == -EAGAIN)
+			goto out_unlock;
+
 		ctx->pos = file->f_pos;
 		if (shared)
 			res = file->f_op->iterate_shared(file, ctx);
@@ -68,8 +72,9 @@ int iterate_dir(struct file *file, struct dir_context *ctx)
 			res = file->f_op->iterate(file, ctx);
 		file->f_pos = ctx->pos;
 		fsnotify_access(file);
-		file_accessed(file, ctx->flags & DIR_CONTEXT_F_NOWAIT);
 	}
+
+out_unlock:
 	if (shared)
 		inode_unlock_shared(inode);
 	else
