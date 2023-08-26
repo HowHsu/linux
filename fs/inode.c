@@ -1970,6 +1970,9 @@ int touch_atime(const struct path *path, bool nowait)
 	if (!atime_needs_update(path, inode))
 		return 0;
 
+	if (nowait)
+		return -EAGAIN;
+
 	if (!sb_start_write_trylock(inode->i_sb))
 		return 0;
 
